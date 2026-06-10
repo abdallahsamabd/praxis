@@ -19,6 +19,11 @@
 
 pub(crate) mod classifier;
 mod config;
+#[allow(
+    dead_code,
+    reason = "store utilities for GET (#458) and DELETE (#459) response endpoints"
+)]
+pub(crate) mod store;
 
 #[cfg(test)]
 #[allow(
@@ -374,7 +379,7 @@ fn promote_boolean_results(
 }
 
 #[cfg(feature = "ai-inference")]
-pub(crate) mod request_validate;
+pub(crate) mod validate;
 
 #[cfg(feature = "ai-inference")]
-pub use request_validate::OpenaiResponsesValidateFilter;
+pub use validate::OpenaiResponsesValidateFilter;

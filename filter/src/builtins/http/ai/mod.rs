@@ -11,6 +11,12 @@ mod inference;
 pub(crate) mod openai;
 #[cfg(feature = "ai-inference")]
 mod prompt_enrich;
+#[cfg(feature = "ai-inference")]
+#[allow(
+    dead_code,
+    reason = "store module is the foundation for upcoming response store filter"
+)]
+pub(crate) mod store;
 
 pub use agentic::{A2aFilter, JsonRpcFilter, McpFilter};
 #[cfg(feature = "ai-inference")]
@@ -21,3 +27,5 @@ pub use openai::OpenaiResponsesValidateFilter;
 pub use openai::ResponsesFormatFilter;
 #[cfg(feature = "ai-inference")]
 pub use prompt_enrich::PromptEnrichFilter;
+#[cfg(feature = "ai-inference")]
+pub use store::ResponseStoreRegistry;
