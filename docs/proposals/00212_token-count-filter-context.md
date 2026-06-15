@@ -8,7 +8,7 @@ stakeholders:
   - shaneutt
   - szedan-rh
 ---
-
+> **Important**: This proposal is currently WIP and on hold, we'll try and get back to this at a later time and move it forward.
 # Token Count Injection into FilterContext
 
 ## What?
