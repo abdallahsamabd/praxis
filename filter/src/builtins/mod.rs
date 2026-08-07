@@ -14,7 +14,7 @@ pub use http::{
     AccessLogFilter, CircuitBreakerFilter, CompressionFilter, ContainsValue, CorsFilter, CredentialInjectionFilter,
     CsrfFilter, DisallowedOriginMode, EndpointSelectorFilter, ForwardedHeadersFilter, GrpcDetectionFilter,
     GuardrailsAction, GuardrailsFilter, HeaderFilter, IpAclFilter, IterativeRequestRouterFilter, JsonBodyFieldFilter,
-    JsonRpcFilter, LoadBalancerFilter, PathRewriteFilter, PeerIdentityTrustFilter, PiiKind, RateLimitFilter,
+    JsonRpcFilter, LoadBalancerFilter, EndpointReselector, PathRewriteFilter, PeerIdentityTrustFilter, PiiKind, RateLimitFilter,
     RateLimitMode, RedirectFilter, RedirectStatus, RequestIdFilter, RouterFilter, RuleTargetKind, StaticResponseFilter,
     TimeoutFilter, UrlRewriteFilter, has_dot_dot_traversal, normalize_rewritten_path,
 };

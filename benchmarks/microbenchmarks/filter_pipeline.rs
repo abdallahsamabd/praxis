@@ -59,6 +59,7 @@ fn bench_pipeline_execute_request(c: &mut Criterion) {
             host: None,
             headers: None,
             cluster: "api".into(),
+            retry_policy: None,
         },
         Route {
             path_match: PathMatch::Prefix {
@@ -67,6 +68,7 @@ fn bench_pipeline_execute_request(c: &mut Criterion) {
             host: None,
             headers: None,
             cluster: "default".into(),
+            retry_policy: None,
         },
     ];
 

@@ -275,6 +275,24 @@ pub struct HttpFilterContext<'a> {
     /// protocol layer.
     pub selected_endpoint_index: Option<usize>,
 
+    /// Endpoints already attempted for this request (alternate-host retry).
+    pub attempted_endpoints: Vec<Arc<str>>,
+
+    /// Resolved retry policy snapshot for this request.
+    pub retry_policy: Option<Arc<praxis_core::config::RetryPolicy>>,
+
+    /// Optional route-level retry policy override (merged by the load balancer).
+    pub route_retry_policy: Option<Arc<praxis_core::config::RetryPolicy>>,
+
+    /// Shared cluster retry state (budget + active-request counter).
+    pub cluster_retry_state: Option<Arc<praxis_core::retry::ClusterRetryState>>,
+
+    /// Whether `cluster_retry_state.leave()` has already been called.
+    pub cluster_retry_state_released: bool,
+
+    /// Reselector for alternate-host retries after connect/response failure.
+    pub endpoint_reselector: Option<Arc<crate::EndpointReselector>>,
+
     /// Wall-clock time source for timestamp generation.
     pub time_source: &'a dyn TimeSource,
 

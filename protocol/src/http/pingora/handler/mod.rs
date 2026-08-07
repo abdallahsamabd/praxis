@@ -26,7 +26,7 @@ use pingora_proxy::{Session, http_proxy};
 use praxis_core::{config::ABSOLUTE_MAX_BODY_BYTES, connectivity::Upstream};
 use praxis_filter::{BodyBuffer, BodyMode, CompressionConfig, FilterPipeline, HttpFilterContext, RequestExtensions};
 use tokio::sync::Semaphore;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use super::{context::PingoraRequestCtx, metrics};
 
@@ -48,6 +48,8 @@ mod reserved_headers;
 mod response_body_filter;
 /// Response filter hook.
 mod response_filter;
+/// Policy-aware retry decision engine.
+mod retry;
 /// Upstream peer selection hook.
 mod upstream_peer;
 /// Upstream request transformation hook.
@@ -61,20 +63,6 @@ mod with_body;
 
 pub use no_body::PingoraHttpHandlerNoBody;
 pub use with_body::PingoraHttpHandler;
-
-// -----------------------------------------------------------------------------
-// Constants
-// -----------------------------------------------------------------------------
-
-/// Maximum number of upstream connection retries for idempotent requests.
-const MAX_RETRIES: usize = 3;
-
-/// Pingora still replays retry attempts from a fixed-size internal buffer.
-///
-/// `StreamBuffer` initial forwarding uses Praxis-owned `pre_read_body`, but
-/// retry replay cannot safely cover bodies larger than Pingora's retry
-/// buffer.
-const RETRY_BODY_LIMIT: u64 = 65_536; // 64 KiB
 
 // -----------------------------------------------------------------------------
 // Load Handler
@@ -236,44 +224,104 @@ fn adjust_compression(
     }
 }
 
-/// Handle upstream connect failures with retry logic.
+/// Handle upstream connect failures with the policy-aware retry engine.
 ///
 /// Retries are skipped when the effective forwarded body size exceeds
-/// Pingora's retry buffer limit.
-///
-/// Body-mutating filters can change payload length after `request_filter`,
-/// so the retry guard uses the larger of the original and mutated lengths.
+/// the configured replay limit, the method is non-idempotent without
+/// opt-in, the budget is exhausted, or the overall deadline has passed.
 fn handle_connect_failure(ctx: &mut PingoraRequestCtx, e: Box<pingora_core::Error>) -> Box<pingora_core::Error> {
-    if ctx.request_is_idempotent {
-        let mutated_len = ctx.mutated_request_body_len.unwrap_or(0) as u64;
-        let effective_body_size = std::cmp::max(ctx.request_body_bytes, mutated_len);
-        if effective_body_size > RETRY_BODY_LIMIT {
-            warn!(
-                body_bytes = ctx.request_body_bytes,
-                mutated_len = ?ctx.mutated_request_body_len,
-                limit = RETRY_BODY_LIMIT,
-                "skipping retry: request body exceeds Pingora retry buffer limit"
-            );
-            return e;
-        }
-        if (ctx.retries as usize) < MAX_RETRIES {
+    let policy = ctx
+        .retry_policy
+        .clone()
+        .unwrap_or_else(|| Arc::new(praxis_core::config::RetryPolicy::legacy_default()));
+    let outcome = retry::classify_error(&e);
+    let decision = retry::should_retry(ctx, &policy, outcome, ctx.cluster_retry_state.as_deref());
+
+    match decision {
+        retry::RetryDecision::Retry { backoff } => {
             ctx.retries += 1;
+            ctx.pending_backoff = Some(backoff);
+            ctx.reselect_on_retry = true;
+            if let Some(upstream) = ctx.upstream_for_retry.as_ref() {
+                let addr = Arc::clone(&upstream.address);
+                if !ctx.attempted_endpoints.iter().any(|e| e.as_ref() == addr.as_ref()) {
+                    ctx.attempted_endpoints.push(addr);
+                }
+            }
+            // Clear so upstream_peer re-selects an alternate host.
+            ctx.upstream_for_retry = None;
             debug!(
                 retries = ctx.retries,
-                max = MAX_RETRIES,
-                "retrying idempotent request after connect failure"
+                max = policy.effective_max_retries(),
+                ?backoff,
+                "retrying after connect failure"
             );
             let mut e = e;
             e.set_retry(true);
-            return e;
-        }
-        warn!(
-            retries = ctx.retries,
-            max = MAX_RETRIES,
-            "retry limit reached for idempotent request"
-        );
+            e
+        },
+        retry::RetryDecision::DoNotRetry => {
+            // Pingora may mark some errors retriable by default; clear the
+            // flag so the policy decision is authoritative.
+            let mut e = e;
+            e.set_retry(false);
+            e
+        },
     }
-    e
+}
+
+/// Decide whether an HTTP response status should trigger a retry.
+///
+/// Returns `Some(error)` marked retriable when the status is retriable
+/// and all guards pass; `None` when the response should be forwarded.
+fn maybe_retry_response(
+    ctx: &mut PingoraRequestCtx,
+    status: u16,
+) -> Option<Box<pingora_core::Error>> {
+    let policy = ctx
+        .retry_policy
+        .clone()
+        .unwrap_or_else(|| Arc::new(praxis_core::config::RetryPolicy::legacy_default()));
+    let outcome = retry::RetryOutcome::StatusCode(status);
+    let decision = retry::should_retry(ctx, &policy, outcome, ctx.cluster_retry_state.as_deref());
+    match decision {
+        retry::RetryDecision::Retry { backoff } => {
+            ctx.retries += 1;
+            ctx.pending_backoff = Some(backoff);
+            ctx.reselect_on_retry = true;
+            if let Some(upstream) = ctx.upstream_for_retry.as_ref() {
+                let addr = Arc::clone(&upstream.address);
+                if !ctx.attempted_endpoints.iter().any(|e| e.as_ref() == addr.as_ref()) {
+                    ctx.attempted_endpoints.push(addr);
+                }
+            }
+            ctx.upstream_for_retry = None;
+            debug!(
+                status,
+                retries = ctx.retries,
+                max = policy.effective_max_retries(),
+                ?backoff,
+                "retrying after retriable response status"
+            );
+            let mut e = pingora_core::Error::explain(
+                pingora_core::ErrorType::HTTPStatus(status),
+                "retriable upstream status",
+            );
+            e.set_retry(true);
+            Some(e)
+        },
+        retry::RetryDecision::DoNotRetry => None,
+    }
+}
+
+/// Release the active-request counter if it has not already been released.
+fn release_retry_state(ctx: &mut PingoraRequestCtx) {
+    if !ctx.cluster_retry_state_released
+        && let Some(state) = ctx.cluster_retry_state.take()
+    {
+        state.leave();
+        ctx.cluster_retry_state_released = true;
+    }
 }
 
 /// Run response filters during the logging phase if the
@@ -561,6 +609,12 @@ mod tests {
 
     use super::*;
 
+    /// Maximum number of upstream connection retries for the legacy default policy.
+    const MAX_RETRIES: usize = praxis_core::config::DEFAULT_MAX_RETRIES as usize;
+
+    /// Default Pingora retry body buffer limit (64 KiB).
+    const RETRY_BODY_LIMIT: u64 = praxis_core::config::DEFAULT_RETRY_BODY_LIMIT_BYTES;
+
     #[test]
     fn first_failure_idempotent_sets_retry() {
         let mut ctx = PingoraRequestCtx::default();
@@ -643,6 +697,75 @@ mod tests {
         ctx.request_is_idempotent = false;
         let e = handle_connect_failure(&mut ctx, make_error());
         assert!(!e.retry(), "non-idempotent request should never retry");
+        assert_eq!(ctx.retries, 0);
+    }
+
+    #[test]
+    fn response_503_retries_when_status5xx_enabled() {
+        let mut ctx = PingoraRequestCtx::default();
+        ctx.request_is_idempotent = true;
+        ctx.retry_policy = Some(Arc::new(praxis_core::config::RetryPolicy {
+            retriable_conditions: vec![praxis_core::config::RetriableCondition::Status5xx],
+            ..praxis_core::config::RetryPolicy::legacy_default()
+        }));
+        let e = maybe_retry_response(&mut ctx, 503).expect("503 should be retriable");
+        assert!(e.retry(), "503 under Status5xx should set retry");
+        assert_eq!(ctx.retries, 1);
+        assert!(ctx.reselect_on_retry);
+        assert!(ctx.pending_backoff.is_some());
+    }
+
+    #[test]
+    fn response_404_does_not_retry() {
+        let mut ctx = PingoraRequestCtx::default();
+        ctx.request_is_idempotent = true;
+        ctx.retry_policy = Some(Arc::new(praxis_core::config::RetryPolicy {
+            retriable_conditions: vec![praxis_core::config::RetriableCondition::Status5xx],
+            ..praxis_core::config::RetryPolicy::legacy_default()
+        }));
+        assert!(
+            maybe_retry_response(&mut ctx, 404).is_none(),
+            "404 must never trigger status-based retry"
+        );
+        assert_eq!(ctx.retries, 0);
+    }
+
+    #[test]
+    fn response_502_does_not_retry_under_legacy_default() {
+        let mut ctx = PingoraRequestCtx::default();
+        ctx.request_is_idempotent = true;
+        // Legacy default is connect_failure only — no Status5xx.
+        assert!(
+            maybe_retry_response(&mut ctx, 502).is_none(),
+            "legacy default must forward 5xx without retry"
+        );
+    }
+
+    #[test]
+    fn max_retries_zero_disables_connect_retry() {
+        let mut ctx = PingoraRequestCtx::default();
+        ctx.request_is_idempotent = true;
+        ctx.retry_policy = Some(Arc::new(praxis_core::config::RetryPolicy {
+            max_retries: Some(0),
+            ..praxis_core::config::RetryPolicy::legacy_default()
+        }));
+        let e = handle_connect_failure(&mut ctx, make_error());
+        assert!(!e.retry(), "max_retries: 0 must disable retries");
+        assert_eq!(ctx.retries, 0);
+    }
+
+    #[test]
+    fn non_idempotent_clears_pingora_default_retry_flag() {
+        let mut ctx = PingoraRequestCtx::default();
+        ctx.request_is_idempotent = false;
+        // Simulate Pingora marking the error retriable by default.
+        let mut e = make_error();
+        e.set_retry(true);
+        let e = handle_connect_failure(&mut ctx, e);
+        assert!(
+            !e.retry(),
+            "policy denial must clear Pingora's default retry flag"
+        );
         assert_eq!(ctx.retries, 0);
     }
 

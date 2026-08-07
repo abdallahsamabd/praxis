@@ -145,7 +145,7 @@ impl TcpFilter for TcpLoadBalancerFilter {
         }
 
         let client_ip = ctx.remote_addr.rsplit_once(':').map_or(ctx.remote_addr, |(ip, _)| ip);
-        let addr = strategy.select(Some(client_ip), health).ok_or_else(|| -> FilterError {
+        let addr = strategy.select(Some(client_ip), health, &[]).ok_or_else(|| -> FilterError {
             format!("tcp_load_balancer: cluster '{cluster_name}' has no available endpoints").into()
         })?;
         debug!(cluster = %cluster_name, upstream = %addr, "TCP upstream selected");

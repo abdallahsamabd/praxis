@@ -6,12 +6,17 @@
 mod endpoint;
 mod health_check;
 mod load_balancer_strategy;
+mod retry_policy;
 
 use std::sync::Arc;
 
 pub use endpoint::Endpoint;
 pub use health_check::{HealthCheckConfig, HealthCheckType};
 pub use load_balancer_strategy::{ConsistentHashOpts, LoadBalancerStrategy, ParameterisedStrategy, SimpleStrategy};
+pub use retry_policy::{
+    BackoffConfig, BudgetPercent, DEFAULT_MAX_RETRIES, DEFAULT_RETRY_BODY_LIMIT_BYTES, HttpStatusCode,
+    MAX_RETRY_BODY_LIMIT_BYTES, RetriableCondition, RetryBodyLimit, RetryBudgetConfig, RetryPolicy,
+};
 use serde::{Deserialize, Serialize};
 
 // -----------------------------------------------------------------------------
@@ -121,6 +126,13 @@ pub struct Cluster {
     /// response to the client.
     #[serde(default)]
     pub write_timeout_ms: Option<u64>,
+
+    /// Optional retry policy for this cluster.
+    ///
+    /// When unset, the proxy retains the legacy connect-failure
+    /// retry behavior (3 attempts, idempotent methods, 64 KiB body).
+    #[serde(default)]
+    pub retry_policy: Option<RetryPolicy>,
 }
 
 impl Cluster {
@@ -153,6 +165,7 @@ impl Cluster {
             tls: None,
             total_connection_timeout_ms: None,
             write_timeout_ms: None,
+            retry_policy: None,
         }
     }
 }

@@ -142,6 +142,7 @@ impl RouterFilter {
     ///         host: None,
     ///         headers: None,
     ///         cluster: "default".into(),
+    ///         retry_policy: None,
     ///     },
     ///     Route {
     ///         path_match: PathMatch::Prefix {
@@ -150,6 +151,7 @@ impl RouterFilter {
     ///         host: None,
     ///         headers: None,
     ///         cluster: "api".into(),
+    ///         retry_policy: None,
     ///     },
     /// ])
     /// .unwrap();
@@ -393,6 +395,9 @@ impl HttpFilter for RouterFilter {
                 "route matched"
             );
             ctx.cluster = Some(Arc::clone(&route.cluster));
+            if let Some(policy) = &route.retry_policy {
+                ctx.route_retry_policy = Some(Arc::new(policy.clone()));
+            }
             Ok(FilterAction::Continue)
         } else {
             debug!(path = %path, "no route matched");

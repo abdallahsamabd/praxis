@@ -21,7 +21,7 @@ pub use security::{
     GuardrailsAction, GuardrailsFilter, IpAclFilter, PeerIdentityTrustFilter, PiiKind, RuleTargetKind,
 };
 pub use traffic_management::{
-    CircuitBreakerFilter, EndpointSelectorFilter, GrpcDetectionFilter, IterativeRequestRouterFilter,
+    CircuitBreakerFilter, EndpointSelectorFilter, EndpointReselector, GrpcDetectionFilter, IterativeRequestRouterFilter,
     LoadBalancerFilter, RateLimitFilter, RateLimitMode, RedirectFilter, RedirectStatus, RouterFilter,
     StaticResponseFilter, TimeoutFilter,
 };

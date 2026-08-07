@@ -52,8 +52,15 @@ pub(super) async fn execute(
     upstream_response.strip_reserved_internal();
     let mut resp = response_header_from_pingora(upstream_response);
     ctx.connection_upgraded = is_upgrade_response;
-    ctx.response_phase_done = true;
     ctx.upstream_response_status = Some(upstream_response.status.as_u16());
+
+    // Evaluate HTTP-status retry before running response filters / committing
+    // the response phase, so a retriable 5xx does not leak to the client.
+    if let Some(err) = super::maybe_retry_response(ctx, upstream_response.status.as_u16()) {
+        return Err(err);
+    }
+
+    ctx.response_phase_done = true;
 
     let (result, headers_modified) = run_response_pipeline(pipeline, ctx, &mut resp).await?;
     let should_snapshot_response_header = pipeline.body_capabilities().any_response_body_condition

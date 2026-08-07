@@ -28,8 +28,8 @@ use tracing::debug;
 
 use super::{
     adjust_compression, emit_request_metrics, fail_to_proxy, handle_connect_failure, hop_by_hop::RemoveHeader as _,
-    logging_cleanup, record_passive_health, request_body_filter, request_filter, response_body_filter, response_filter,
-    upstream_peer, upstream_request, via,
+    logging_cleanup, record_passive_health, release_retry_state, request_body_filter, request_filter,
+    response_body_filter, response_filter, upstream_peer, upstream_request, via,
 };
 use crate::http::pingora::context::PingoraRequestCtx;
 
@@ -199,6 +199,26 @@ impl ProxyHttp for PingoraHttpHandler {
         handle_connect_failure(ctx, e)
     }
 
+    fn error_while_proxy(
+        &self,
+        peer: &HttpPeer,
+        _session: &mut Session,
+        e: Box<pingora_core::Error>,
+        ctx: &mut Self::CTX,
+        _client_reused: bool,
+    ) -> Box<pingora_core::Error> {
+        // Preserve an explicit retry decision from the response-status path
+        // (already validated by the policy engine).
+        if e.retry() {
+            return e;
+        }
+        let e = e.more_context(format!("Peer: {peer}"));
+        // Mid-proxy errors (reset, refused stream, etc.) go through the same
+        // policy engine as connect failures — Pingora's decide_reuse must not
+        // bypass idempotency / budget / max_retries guards.
+        handle_connect_failure(ctx, e)
+    }
+
     async fn fail_to_proxy(&self, session: &mut Session, e: &pingora_core::Error, ctx: &mut Self::CTX) -> FailToProxy
     where
         Self::CTX: Send + Sync,
@@ -252,6 +272,7 @@ impl ProxyHttp for PingoraHttpHandler {
         let pipeline = ctx.pipeline(&self.pipeline);
         emit_request_metrics(session, ctx);
         record_passive_health(&pipeline, e, ctx);
+        release_retry_state(ctx);
         logging_cleanup(&pipeline, ctx).await;
     }
 }

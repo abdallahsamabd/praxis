@@ -32,7 +32,8 @@ pub use builtins::BasicAuthFilter;
 pub use builtins::PolicyFilter;
 pub use builtins::{
     CircuitBreakerFilter, ContainsValue, CredentialInjectionFilter, DisallowedOriginMode, EndpointSelectorFilter,
-    GuardrailsAction, GuardrailsFilter, LoadBalancerFilter, PiiKind, RateLimitMode, RedirectStatus, RouterFilter,
+    GuardrailsAction, GuardrailsFilter, LoadBalancerFilter, EndpointReselector, PiiKind, RateLimitMode, RedirectStatus,
+    RouterFilter,
     RuleTargetKind, has_dot_dot_traversal, http::payload_processing::compression_config::CompressionConfig,
     normalize_rewritten_path,
 };
@@ -442,6 +443,12 @@ pub(crate) mod test_utils {
             response_headers_modified: false,
             rewritten_path: None,
             selected_endpoint_index: None,
+            attempted_endpoints: Vec::new(),
+            retry_policy: None,
+            route_retry_policy: None,
+            cluster_retry_state: None,
+            cluster_retry_state_released: false,
+            endpoint_reselector: None,
             time_source: &praxis_core::time::SystemTimeSource,
             upstream: None,
         }
