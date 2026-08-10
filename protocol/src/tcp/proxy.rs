@@ -866,10 +866,6 @@ mod tests {
             1,
             "the selecting filter must run its connect hook exactly once"
         );
-        // The release path must run the paired disconnect hook; that is what
-        // decrements the least-connections counter the selector incremented.
-        // Asserting on the hook (rather than a follow-up selection) keeps the
-        // test independent of the load balancer's tie-break ordering.
         assert_eq!(
             disconnects.load(Ordering::SeqCst),
             1,

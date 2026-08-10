@@ -176,27 +176,31 @@ impl HttpFilter for LoadBalancerFilter {
             format!("load_balancer filter: unknown cluster '{cluster_name}'").into()
         })?;
 
+        // Session affinity: a preceding filter pinned an endpoint address.
+        // Build a proper Upstream with the cluster's TLS and connection options.
         let health = Self::cluster_health(ctx.health_registry, cluster_name);
 
         // Session affinity: a preceding filter pinned an endpoint address.
         // Build a proper Upstream with the cluster's TLS and connection options.
         if let Some(pinned_addr) = ctx.pinned_endpoint_address.take() {
-            // Health state is built from the cluster's configured endpoints,
-            // so an unknown index means the pinned address left the cluster
-            // (e.g. a config reload); fall through to normal selection rather
-            // than routing to a removed endpoint. Recording the index also
-            // lets passive health checks observe pinned traffic.
             let pinned_index = health.and_then(|h| h.endpoint_index(&pinned_addr));
             if health.is_none() || pinned_index.is_some() {
                 debug!(cluster = %cluster_name, upstream = %pinned_addr, "using pinned endpoint from session affinity");
                 ctx.selected_endpoint_index = pinned_index;
-                // Known limitation: a pinned request is served directly without
-                // a retry policy, retry budget, or endpoint reselector, so it is
-                // not retried or failed over on a transient connect failure, and
-                // its load is not tracked by counter-based strategies (strategy
-                // .select is bypassed to honor affinity). Health-check-detected
-                // outages are handled upstream by the session-affinity filter,
-                // which does not pin to a down endpoint.
+                ctx.set_metadata("lb.selected", "true");
+
+                entry.retry_state.enter();
+                ctx.cluster_retry_state = Some(Arc::clone(&entry.retry_state));
+
+                let policy = match &ctx.route_retry_policy {
+                    Some(route_override) => Arc::new(entry.retry_policy.merge_override(route_override)),
+                    None => Arc::clone(&entry.retry_policy),
+                };
+                ctx.retry_policy = Some(Arc::clone(&policy));
+
+                let hash_key = entry.strategy.capture_hash_key(ctx);
+                ctx.endpoint_reselector = Some(Arc::new(entry.reselector_with_policy(hash_key, policy)));
+                ctx.attempted_endpoints.push(Arc::clone(&pinned_addr));
                 ctx.upstream = Some(entry.build_upstream(pinned_addr, ctx));
                 return Ok(FilterAction::Continue);
             }

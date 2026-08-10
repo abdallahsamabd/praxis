@@ -113,9 +113,6 @@ fn configure_pipeline(
     if !kv_stores.is_empty() {
         pipeline.set_kv_stores(kv_stores.clone());
     }
-    // Always inject the process-wide registry (even while empty): the sticky
-    // sessions filter adopts per-cluster stores into it on demand, which is
-    // what lets session bindings survive config reloads.
     pipeline.set_session_stores(Arc::clone(session_stores));
     pipeline.set_subrequest_client(subrequest_client.clone());
     pipeline.apply_insecure_options(&config.insecure_options);

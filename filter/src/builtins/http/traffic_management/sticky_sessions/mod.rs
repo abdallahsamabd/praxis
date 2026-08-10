@@ -359,6 +359,10 @@ impl HttpFilter for StickySessionsFilter {
     }
 
     async fn on_response(&self, ctx: &mut HttpFilterContext<'_>) -> Result<FilterAction, FilterError> {
+        if ctx.response_header.as_ref().is_some_and(|r| r.status.is_server_error()) {
+            return Ok(FilterAction::Continue);
+        }
+
         let Some(cfg) = self.cluster_config(ctx) else {
             return Ok(FilterAction::Continue);
         };

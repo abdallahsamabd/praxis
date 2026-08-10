@@ -44,11 +44,11 @@ pub struct SessionStore {
     /// Concurrent map of session key → entry.
     map: DashMap<Arc<str>, SessionEntry>,
     /// Upper bound on entries before eviction kicks in.
-    max_entries: u64,
+    pub(super) max_entries: u64,
     /// Idle timeout; entries not accessed within this window expire.
-    ttl: Duration,
+    pub(super) ttl: Duration,
     /// Strategy used to pick a victim when at capacity.
-    eviction: EvictionPolicy,
+    pub(super) eviction: EvictionPolicy,
     /// Monotonic timestamp (ms) of the last opportunistic sweep.
     last_sweep_ms: AtomicU64,
     /// The `Instant` epoch used to compute relative ms timestamps.
