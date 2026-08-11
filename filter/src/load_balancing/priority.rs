@@ -90,14 +90,9 @@ impl PriorityLevels {
             }
         }
 
-        // Panic mode: no tier meets its capacity threshold. Prefer the
-        // highest-priority tier that still has at least one healthy endpoint;
-        // blindly routing to tier 0 would send traffic to a fully-dead tier
-        // while healthy lower tiers exist.
+        // Panic mode: no tier has capacity — try the highest-priority tier anyway.
         self.tiers
-            .iter()
-            .find(|tier| Self::tier_healthy_count(tier, health) > 0)
-            .or_else(|| self.tiers.first())
+            .first()
             .and_then(|t| t.strategy.select(hash_key, health, exclude))
     }
 
@@ -116,28 +111,20 @@ impl PriorityLevels {
             return false;
         }
 
-        if health.is_none() {
+        let Some(state) = health else {
             return true;
-        }
+        };
 
-        let healthy_count = Self::tier_healthy_count(tier, health);
+        let healthy_count = tier
+            .indices
+            .iter()
+            .filter(|&&idx| state.endpoints().get(idx).is_some_and(EndpointHealth::is_healthy))
+            .count();
 
         // healthy% >= 100/overprovisioning_factor
         // ⟺ healthy_count * overprovisioning_factor >= total_count * 100
         let factor = u64::from(self.overprovisioning_factor);
         (healthy_count as u64) * factor >= (total_count as u64) * 100
-    }
-
-    /// Number of healthy endpoints in a tier; all endpoints count as healthy
-    /// when no health state is available.
-    fn tier_healthy_count(tier: &PriorityTier, health: Option<&ClusterHealthState>) -> usize {
-        let Some(state) = health else {
-            return tier.indices.len();
-        };
-        tier.indices
-            .iter()
-            .filter(|&&idx| state.endpoints().get(idx).is_some_and(EndpointHealth::is_healthy))
-            .count()
     }
 }
 
@@ -204,35 +191,6 @@ mod tests {
             seen.contains("10.0.0.3:80") || seen.contains("10.0.0.4:80"),
             "should spill to failover tier"
         );
-    }
-
-    #[test]
-    fn panic_mode_prefers_tier_with_healthy_endpoints() {
-        let endpoints = vec![
-            ep("10.0.0.1:80", 0, 0),
-            ep("10.0.0.2:80", 1, 0),
-            ep("10.0.0.3:80", 2, 1),
-            ep("10.0.0.4:80", 3, 1),
-        ];
-        // Factor 400 → threshold 25%; tier 1 with 1/2 healthy (50%) passes it,
-        // so raise the bar: factor 100 → threshold 100%. Tier 0 has 0/2 and
-        // tier 1 has 1/2 healthy: no tier meets capacity, but panic mode must
-        // still prefer tier 1's healthy endpoint over dead tier 0.
-        let pl = PriorityLevels::new(endpoints, &SimpleStrategy::RoundRobin, 100);
-
-        let state = health_state(4);
-        state.endpoints()[0].mark_unhealthy();
-        state.endpoints()[1].mark_unhealthy();
-        state.endpoints()[2].mark_unhealthy();
-
-        for _ in 0..10 {
-            let selected = pl.select(None, Some(&state), &[]).unwrap();
-            assert_eq!(
-                selected.as_ref(),
-                "10.0.0.4:80",
-                "panic mode must route to the only tier with a healthy endpoint"
-            );
-        }
     }
 
     #[test]

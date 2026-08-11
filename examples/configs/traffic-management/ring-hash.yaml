@@ -11,6 +11,9 @@
 #     curl -H "X-Session-Id: sess-42" http://localhost:8080/
 #   done
 
+insecure_options:
+  allow_private_endpoints: true # example proxies to local backends
+
 listeners:
   - name: default
     address: "127.0.0.1:8080"
@@ -37,6 +40,3 @@ filter_chains:
               - "127.0.0.1:3001"
               - "127.0.0.1:3002"
               - "127.0.0.1:3003"
-
-insecure_options:
-  allow_private_endpoints: true # example proxies to local backends

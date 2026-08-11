@@ -93,11 +93,6 @@ impl ZoneAware {
     }
 
     /// Propagate release to both inner strategies.
-    /// Release is forwarded to both inner strategies because the composite
-    /// cannot know which one served the request. With counter-based inner
-    /// strategies (`least_connections`, `p2c`) the counters therefore
-    /// saturate toward zero on the side that did not serve, making in-flight
-    /// counts approximate while traffic spills between zones.
     pub(crate) fn release(&self, addr: &str) {
         if let Some(local) = &self.local_strategy {
             local.release(addr);

@@ -12,6 +12,9 @@
 #   cargo run -p praxis-proxy -- -c examples/configs/traffic-management/zone-aware.yaml
 #   curl http://localhost:8080/
 
+insecure_options:
+  allow_private_endpoints: true # example proxies to local backends
+
 listeners:
   - name: default
     address: "127.0.0.1:8080"
@@ -43,6 +46,3 @@ filter_chains:
                 zone: "us-east-1b"
               - address: "127.0.0.1:3004"
                 zone: "us-west-2a"
-
-insecure_options:
-  allow_private_endpoints: true # example proxies to local backends

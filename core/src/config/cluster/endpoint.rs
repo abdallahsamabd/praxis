@@ -73,7 +73,7 @@ enum EndpointRaw {
     Simple(String),
 
     /// Endpoint object form.
-    Weighted(WeightedEndpointRaw),
+    Weighted(Box<WeightedEndpointRaw>),
 }
 
 /// Object form of an endpoint, capturing unknown keys for rejection.
@@ -114,16 +114,16 @@ impl TryFrom<EndpointRaw> for Endpoint {
                     let mut keys: Vec<&str> = w.unknown.keys().map(String::as_str).collect();
                     keys.sort_unstable();
                     return Err(format!(
-                        "endpoint '{}': unknown field(s): {}; expected only 'address' and 'weight'",
+                        "endpoint '{}': unknown field(s): {}; expected only 'address', 'weight', 'metadata', 'priority', and 'zone'",
                         w.address,
                         keys.join(", ")
                     ));
                 }
                 Ok(Self::Weighted {
                     address: w.address,
-                    weight: w.weight,
                     metadata: w.metadata,
                     priority: w.priority,
+                    weight: w.weight,
                     zone: w.zone,
                 })
             },

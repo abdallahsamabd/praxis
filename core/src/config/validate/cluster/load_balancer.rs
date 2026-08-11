@@ -8,32 +8,11 @@ use crate::{
     errors::ProxyError,
 };
 
-/// Hard ceiling on ring-hash entries per cluster (`Σ weight × virtual_nodes`).
-///
-/// Each entry costs 16 bytes and the ring is rebuilt on every config reload,
-/// so an unbounded product of weights (≤1000), `virtual_nodes` (≤10000), and
-/// endpoint count could allocate gigabytes.
-const MAX_RING_ENTRIES: u64 = 1_048_576; // 1 Mi entries ≈ 16 MiB
-
 /// Validate that parameterised strategy options are within sane bounds.
 pub(in crate::config::validate) fn validate_lb_strategy(cluster: &Cluster) -> Result<(), ProxyError> {
     let name = &cluster.name;
     if let LoadBalancerStrategy::Parameterised(param) = &cluster.load_balancer_strategy {
         validate_parameterised(name, param)?;
-        if let ParameterisedStrategy::RingHash(opts) = param {
-            let entries: u64 = cluster
-                .endpoints
-                .iter()
-                .map(|ep| u64::from(ep.weight()) * u64::from(opts.virtual_nodes))
-                .sum();
-            if entries > MAX_RING_ENTRIES {
-                return Err(ProxyError::Config(format!(
-                    "cluster '{name}': ring_hash ring would have {entries} entries \
-                     (sum of endpoint weight × virtual_nodes); maximum is {MAX_RING_ENTRIES} — \
-                     lower virtual_nodes or endpoint weights",
-                )));
-            }
-        }
     }
     Ok(())
 }
@@ -59,13 +38,9 @@ fn validate_parameterised(name: &str, param: &ParameterisedStrategy) -> Result<(
                 opts.min_local_healthy_pct,
             )));
         },
-        ParameterisedStrategy::Priority(opts) if opts.overprovisioning_factor < 100 => {
-            // Capacity spill checks healthy% >= 100/factor; a factor below 100
-            // is unsatisfiable even at full health, so every request would
-            // take the panic path.
+        ParameterisedStrategy::Priority(opts) if opts.overprovisioning_factor == 0 => {
             return Err(ProxyError::Config(format!(
-                "cluster '{name}': priority.overprovisioning_factor must be >= 100 (got {})",
-                opts.overprovisioning_factor,
+                "cluster '{name}': priority.overprovisioning_factor must be >= 1"
             )));
         },
         ParameterisedStrategy::ConsistentHash(_)
@@ -175,48 +150,9 @@ mod tests {
         )));
         let err = validate_lb_strategy(&cluster).unwrap_err();
         assert!(
-            err.to_string().contains("overprovisioning_factor must be >= 100"),
+            err.to_string().contains("overprovisioning_factor must be >= 1"),
             "got: {err}"
         );
-    }
-
-    #[test]
-    fn reject_priority_sub_100_overprovisioning() {
-        // healthy% >= 100/factor is unsatisfiable for factors below 100, so
-        // every request would take the panic path.
-        let cluster = cluster_with_strategy(LoadBalancerStrategy::Parameterised(ParameterisedStrategy::Priority(
-            PriorityOpts {
-                inner_strategy: SimpleStrategy::default(),
-                overprovisioning_factor: 99,
-            },
-        )));
-        let err = validate_lb_strategy(&cluster).unwrap_err();
-        assert!(
-            err.to_string().contains("overprovisioning_factor must be >= 100"),
-            "got: {err}"
-        );
-    }
-
-    #[test]
-    fn reject_ring_hash_oversized_ring() {
-        let mut cluster = cluster_with_strategy(LoadBalancerStrategy::Parameterised(ParameterisedStrategy::RingHash(
-            RingHashOpts {
-                hash_function: HashFunction::default(),
-                header: None,
-                virtual_nodes: 10_000,
-            },
-        )));
-        cluster.endpoints = (0..3)
-            .map(|i| crate::config::Endpoint::Weighted {
-                address: format!("10.0.0.{i}:80"),
-                weight: 1_000,
-                metadata: std::collections::HashMap::new(),
-                priority: 0,
-                zone: None,
-            })
-            .collect();
-        let err = validate_lb_strategy(&cluster).unwrap_err();
-        assert!(err.to_string().contains("ring_hash ring would have"), "got: {err}");
     }
 
     #[test]

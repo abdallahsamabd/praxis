@@ -13,6 +13,9 @@
 #   cargo run -p praxis-proxy -- -c examples/configs/traffic-management/subset-lb.yaml
 #   curl http://localhost:8080/
 
+insecure_options:
+  allow_private_endpoints: true # example proxies to local backends
+
 listeners:
   - name: default
     address: "127.0.0.1:8080"
@@ -46,6 +49,3 @@ filter_chains:
               - address: "127.0.0.1:3003"
                 metadata:
                   version: "canary"
-
-insecure_options:
-  allow_private_endpoints: true # example proxies to local backends

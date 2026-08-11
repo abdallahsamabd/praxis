@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use praxis_core::health::ClusterHealthState;
 
-use super::{endpoint::WeightedEndpoint, hash::fnv1a};
+use super::{endpoint::WeightedEndpoint, hash::fnv1a, is_excluded};
 
 // -----------------------------------------------------------------------------
 // ConsistentHash
@@ -92,12 +92,6 @@ impl ConsistentHash {
         None
     }
 }
-
-/// Returns `true` if `addr` appears in the exclusion list.
-fn is_excluded(addr: &str, exclude: &[Arc<str>]) -> bool {
-    exclude.iter().any(|e| e.as_ref() == addr)
-}
-
 
 // -----------------------------------------------------------------------------
 // Tests

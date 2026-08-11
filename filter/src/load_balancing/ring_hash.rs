@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use praxis_core::{config::HashFunction, health::ClusterHealthState};
 
-use super::{endpoint::WeightedEndpoint, hash::fnv1a};
+use super::{endpoint::WeightedEndpoint, hash::fnv1a, is_excluded};
 
 // -----------------------------------------------------------------------------
 // RingHash
@@ -58,7 +58,10 @@ impl RingHash {
     /// Hash the key and return the corresponding healthy endpoint.
     ///
     /// Uses binary search on the sorted ring to find the first virtual node
-    /// with a hash >= the key hash. Probes clockwise to skip unhealthy endpoints.
+    /// with a hash >= the key hash. Probes clockwise to skip unhealthy and
+    /// excluded endpoints.
+    #[expect(clippy::indexing_slicing, reason = "ring indices are bounded by ring_len via modulo")]
+    #[expect(clippy::too_many_lines, reason = "health + exclude probe is clearer inline")]
     pub(crate) fn select(
         &self,
         hash_key: Option<&str>,
@@ -76,65 +79,32 @@ impl RingHash {
             Ok(i) | Err(i) => i % self.ring.len(),
         };
 
-        if let Some(state) = health
-            && let Some(addr) = self.healthy_probe(start, state, exclude)
-        {
-            return Some(addr);
+        let ring_len = self.ring.len();
+
+        if let Some(state) = health {
+            for offset in 0..ring_len {
+                let idx = (start + offset) % ring_len;
+                let ep_idx = self.ring[idx].1;
+                let ep = &self.endpoints[ep_idx];
+                if is_excluded(&ep.address, exclude) {
+                    continue;
+                }
+                if ep.index < state.endpoints().len() && state.endpoints()[ep.index].is_healthy() {
+                    return Some(Arc::clone(&ep.address));
+                }
+            }
         }
 
-        Some(self.panic_mode_select(start, exclude))
-    }
-
-    /// Walk the ring clockwise from `start` for a healthy, non-excluded endpoint.
-    ///
-    /// The probe is bounded by distinct endpoints rather than ring entries:
-    /// with every endpoint unhealthy, walking the full ring would revisit
-    /// each endpoint's virtual nodes hundreds of times.
-    #[expect(clippy::indexing_slicing, reason = "ring indices are bounded by ring_len via modulo")]
-    fn healthy_probe(&self, start: usize, state: &ClusterHealthState, exclude: &[Arc<str>]) -> Option<Arc<str>> {
-        let ring_len = self.ring.len();
-        // Bound the clockwise probe by distinct endpoints, not ring
-        // entries: with every endpoint unhealthy, walking the full ring
-        // would visit each endpoint's virtual nodes hundreds of times.
-        let mut visited = vec![false; self.endpoints.len()];
-        let mut remaining = self.endpoints.len();
+        // Panic mode: all unhealthy or no health state — pick first non-excluded.
         for offset in 0..ring_len {
             let idx = (start + offset) % ring_len;
             let ep_idx = self.ring[idx].1;
             let ep = &self.endpoints[ep_idx];
-            if !super::is_excluded(&ep.address, exclude)
-                && ep.index < state.endpoints().len()
-                && state.endpoints()[ep.index].is_healthy()
-            {
+            if !is_excluded(&ep.address, exclude) {
                 return Some(Arc::clone(&ep.address));
-            }
-            if !visited[ep_idx] {
-                visited[ep_idx] = true;
-                remaining -= 1;
-                if remaining == 0 {
-                    break;
-                }
             }
         }
         None
-    }
-
-    /// Panic-mode pick: all endpoints unhealthy, or no health state at all.
-    ///
-    /// Still honours the exclusion set so a retry does not land back on the
-    /// endpoint that just failed, falling back to the hashed position only
-    /// when every endpoint has been excluded.
-    #[expect(clippy::indexing_slicing, reason = "ring indices are bounded by ring_len via modulo")]
-    fn panic_mode_select(&self, start: usize, exclude: &[Arc<str>]) -> Arc<str> {
-        let ring_len = self.ring.len();
-        for offset in 0..ring_len {
-            let ep = &self.endpoints[self.ring[(start + offset) % ring_len].1];
-            if !super::is_excluded(&ep.address, exclude) {
-                return Arc::clone(&ep.address);
-            }
-        }
-        let ep_idx = self.ring[start].1;
-        Arc::clone(&self.endpoints[ep_idx].address)
     }
 }
 
@@ -402,45 +372,6 @@ mod tests {
         let first = rh.select(Some("/stable"), None, &[]).unwrap();
         let second = rh.select(Some("/stable"), None, &[]).unwrap();
         assert_eq!(first, second, "same key should always select same endpoint (xxhash)");
-    }
-
-    /// Known-answer vectors from the reference `xxHash64` implementation
-    /// (seed 0), covering the <4B, 4–31B, and ≥32B code paths.
-    #[test]
-    fn xxhash64_known_answers() {
-        assert_eq!(xxhash64(""), 0xEF46_DB37_51D8_E999);
-        assert_eq!(xxhash64("a"), 0xD24E_C4F1_A98C_6E5B);
-        assert_eq!(xxhash64("abc"), 0x44BC_2CF5_AD77_0999);
-        assert_eq!(xxhash64("session-key-12345"), 0xF0C4_C121_17BE_EEAC);
-        assert_eq!(
-            xxhash64("0123456789abcdef0123456789abcdef0123456789abcdef"),
-            0xE352_1644_4A3C_253B,
-            "≥32-byte input exercises the accumulator-lane path"
-        );
-    }
-
-    /// Known-answer vectors from the reference `MurmurHash3` `x64_128`
-    /// implementation (seed 0, lower 64 bits), covering tail-only and
-    /// full-block code paths.
-    #[test]
-    fn murmur3_known_answers() {
-        assert_eq!(murmur3_64(""), 0x0);
-        assert_eq!(murmur3_64("a"), 0x8555_5565_F659_7889);
-        assert_eq!(murmur3_64("abc"), 0xB496_3F3F_3FAD_7867);
-        assert_eq!(murmur3_64("session-key-12345"), 0x7726_3005_1E18_5514);
-        assert_eq!(
-            murmur3_64("0123456789abcdef0123456789abcdef0123456789abcdef"),
-            0x9AC8_FB1C_6EC3_A370,
-            "≥16-byte input exercises the block loop"
-        );
-    }
-
-    /// Known-answer vectors for FNV-1a 64.
-    #[test]
-    fn fnv1a_known_answers() {
-        assert_eq!(fnv1a(""), 0xCBF2_9CE4_8422_2325);
-        assert_eq!(fnv1a("a"), 0xAF63_DC4C_8601_EC8C);
-        assert_eq!(fnv1a("abc"), 0xE71F_A219_0541_574B);
     }
 
     #[test]

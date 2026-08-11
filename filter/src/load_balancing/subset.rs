@@ -109,11 +109,6 @@ impl Subset {
     }
 
     /// Propagate release to inner strategies.
-    /// Release is forwarded to both inner strategies because the composite
-    /// cannot know which one served the request. With counter-based inner
-    /// strategies (`least_connections`, `p2c`) the counters therefore
-    /// saturate toward zero on the side that did not serve, making in-flight
-    /// counts approximate when the fallback path is in use.
     pub(crate) fn release(&self, addr: &str) {
         if let Some(strategy) = &self.subset_strategy {
             strategy.release(addr);
