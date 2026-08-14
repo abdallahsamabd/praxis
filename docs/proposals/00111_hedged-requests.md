@@ -8,6 +8,7 @@ graduation_criteria:
   - How? section with requirements and design
   - Hedge trigger and cancellation logic validated
   - Budget algorithm validated
+  - Determine if we want filters/conditions on hedged requests, and how that would work
 stakeholders:
   - shaneutt
 ---
