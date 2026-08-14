@@ -9,6 +9,7 @@ graduation_criteria:
   - How? section with requirements and design
   - Retry decision engine validated
   - Budget/backoff algorithms validated
+  - Needs adaptations to the new Praxis Policy Engine (PPE) before moving beyond `proposed`
 stakeholders:
   - shaneutt
 ---
