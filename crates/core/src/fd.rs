@@ -707,14 +707,13 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn size_and_listing_counts_agree() {
-        let agreed = std::iter::repeat_with(|| {
+        let _counting = exclusive_descriptor_counting();
+        let agreed = retry_until_quiet(|| {
             let before = count_from_size();
             let listed = count_from_listing();
             let after = count_from_size();
             before.is_none() || (before == after && listed == before)
-        })
-        .take(200)
-        .any(|agree| agree);
+        });
         assert!(
             agreed,
             "with no concurrent opens, the size and the listing (less its own handle) must match"
@@ -733,8 +732,9 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn opening_files_raises_the_sample() {
+        let _counting = exclusive_descriptor_counting();
         let pressure = FdPressure::new(u64::MAX, true);
-        let exact = std::iter::repeat_with(|| {
+        let exact = retry_until_quiet(|| {
             pressure.refresh();
             let before = pressure.usage().open;
             let files: Vec<std::fs::File> = std::iter::repeat_with(|| tempfile::tempfile().unwrap())
@@ -745,9 +745,7 @@ mod tests {
             drop(files);
             pressure.refresh();
             before == pressure.usage().open && during == before.saturating_add(32)
-        })
-        .take(1_000)
-        .any(|exact| exact);
+        });
         assert!(
             exact,
             "in a window where no other test opens or closes a descriptor, 32 new files must add exactly 32"
@@ -822,6 +820,37 @@ mod tests {
         fn settle_new_connection(&self) {
             self.pending.fetch_add(1, Ordering::Relaxed);
             self.settle(true);
+        }
+    }
+
+    /// Held by the tests that need an exact descriptor count, so they never
+    /// overlap: each opens and closes descriptors while the other counts.
+    static EXACT_COUNTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// How long an exact count keeps retrying for a moment when no other test
+    /// in this binary opens or closes a descriptor.
+    const QUIET_RETRY_BUDGET: Duration = Duration::from_secs(5);
+
+    /// Take [`EXACT_COUNTING`] for as long as the guard lives.
+    fn exclusive_descriptor_counting() -> std::sync::MutexGuard<'static, ()> {
+        EXACT_COUNTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Run `attempt` until it succeeds or [`QUIET_RETRY_BUDGET`] passes.
+    ///
+    /// Other tests in this binary open and close descriptors in bursts that
+    /// can outlast thousands of attempts, so the budget is time rather than a
+    /// count: back-to-back retries would all land inside one burst.
+    fn retry_until_quiet<F: FnMut() -> bool>(mut attempt: F) -> bool {
+        let started = Instant::now();
+        loop {
+            if attempt() {
+                return true;
+            }
+            if started.elapsed() >= QUIET_RETRY_BUDGET {
+                return false;
+            }
+            std::thread::yield_now();
         }
     }
 
