@@ -35,9 +35,10 @@ highlight = "all"
 # the Pingora fork's large subtree pulls its own versions of some common
 # crates (syn, hashbrown, getrandom, ...) that differ from praxis's other
 # transitive deps. Suppress the whole fork subtree rather than tracking
-# each ecosystem-wide duplicate. Re-evaluate on each Pingora fork sync.
+# each ecosystem-wide duplicate. No version on the crate, so a fork bump
+# cannot silently unmatch it. Re-evaluate on each Pingora fork sync.
 skip-tree = [
-    { crate = "quixotic-plecostomus-core@0.8", reason = "pingora fork transitive subtree pulls older shared crates than praxis" },
+    { crate = "quixotic-plecostomus-core", reason = "pingora fork transitive subtree pulls older shared crates than praxis" },
 ]
 
 [sources]
