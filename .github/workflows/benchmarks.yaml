@@ -32,7 +32,9 @@ jobs:
 
   benchmark:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # Envoy alone took about 90 minutes; with Praxis benchmarked as well the
+    # run needs roughly twice that.
+    timeout-minutes: 240
     permissions:
       contents: read
     steps:
