@@ -37,10 +37,3 @@ updates:
       default-days: 7
     schedule:
       interval: "weekly"
-
-  - package-ecosystem: "github-actions"
-    directory: ".github/actions/install-nightly-rust"
-    cooldown:
-      default-days: 7
-    schedule:
-      interval: "weekly"

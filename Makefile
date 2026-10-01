@@ -7,7 +7,9 @@
 VERSION          ?= $(shell sed -n 's/^version[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' Cargo.toml | head -n 1)
 IMAGE            ?= praxis
 CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
-NIGHTLY_VERSION  := $(shell grep -m1 'rust-toolchain@' .github/actions/install-nightly-rust/action.yml | grep -oE 'nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}')
+# The dated nightly that rustfmt runs on. CI's lint job pins the same date in
+# the conventions repo's setup-rust-lint action; bump the two together.
+NIGHTLY_VERSION  := nightly-2026-03-28
 V                ?=
 
 UNAME_S := $(shell uname -s | tr A-Z a-z)
@@ -99,10 +101,6 @@ check-prereqs-extra:
 	done
 
 check-prereqs-nightly-toolchain: check-prereqs
-	@test -n "$(NIGHTLY_VERSION)" || { \
-		echo "Could not determine NIGHTLY_VERSION from .github/actions/install-nightly-rust/action.yml" >&2; \
-		exit 1; \
-	}
 	@cargo +$(NIGHTLY_VERSION) --version >/dev/null 2>&1 || { \
 		echo "Rust $(NIGHTLY_VERSION) is not installed — run \"rustup toolchain install $(NIGHTLY_VERSION)\" (see docs/developing/getting-started.md)" >&2; \
 		exit 1; \
