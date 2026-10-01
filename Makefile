@@ -658,8 +658,10 @@ test-unit:
 	cargo test -p praxis-proxy-filter --no-default-features $(_NOCAPTURE)
 	cargo test -p praxis-proxy-core --no-default-features $(_NOCAPTURE)
 
+# The single-suite targets use the same --all-features as test-integration,
+# so running one suite runs the same tests it would there.
 test-schema:
-	cargo test -p praxis-tests-schema $(_NOCAPTURE)
+	cargo test --all-features -p praxis-tests-schema $(_NOCAPTURE)
 
 # Everything under tests/ (schema, security, resilience, integration) in a
 # single pass, every feature on. Conformance is separate (test-conformance).
@@ -683,10 +685,10 @@ test-conformance: $(H2SPEC)
 test-security: test-security-suite
 
 test-security-suite:
-	cargo test -p praxis-tests-security $(_NOCAPTURE)
+	cargo test --all-features -p praxis-tests-security $(_NOCAPTURE)
 
 test-resilience:
-	cargo test -p praxis-tests-resilience $(_NOCAPTURE)
+	cargo test --all-features -p praxis-tests-resilience $(_NOCAPTURE)
 
 test-config-validation: test-schema
 
