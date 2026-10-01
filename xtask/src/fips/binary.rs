@@ -159,7 +159,7 @@ fn backend_symbols(file: &object::File<'_>) -> BTreeMap<&'static str, usize> {
 fn imports(report: &mut Report, file: &object::File<'_>) {
     let count = file
         .imports()
-        .and_then(|imports| imports.collect::<object::Result<Vec<_>>>())
+        .and_then(Iterator::collect::<object::Result<Vec<_>>>)
         .map_or(0, |imports| {
             imports
                 .iter()
