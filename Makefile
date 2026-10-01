@@ -31,7 +31,7 @@ RUST_TARGETS := all build release check \
 	test-schema test-integration test-conformance \
 	test-security test-security-suite test-resilience \
 	test-config-validation test-config \
-	bench build-benches \
+	bench build-benches check-features \
 	lint fmt doc audit coverage coverage-check \
 	build-fips release-fips check-fips lint-fips test-fips fips-deps fips-report \
 	run-echo run-debug
@@ -126,8 +126,10 @@ build:
 build-dev:
 	cargo build --workspace --features dev
 
+# The shipped binary only: the release profile is fat LTO with one codegen
+# unit, which is slow, and nothing else in the workspace needs it.
 release:
-	cargo build --workspace --release
+	cargo build --release -p praxis-proxy
 
 check:
 	cargo check --workspace
@@ -805,22 +807,19 @@ publish:
 # stop those tests running entirely, dropping the covered lib code with them, so
 # only genuinely non-contributing packages are excluded: benches (no #[test]
 # cases), conformance (needs the external h2spec binary), and xtask (dev tool).
+COVERAGE_MIN  := 96
+LLVM_COV_ARGS := --workspace \
+	--exclude praxis-tests-benches \
+	--exclude praxis-tests-conformance \
+	--exclude xtask \
+	--ignore-filename-regex '(target/|tests/|crates/server/src/main\.rs)' \
+	--fail-under-lines $(COVERAGE_MIN)
+
 coverage:
-	PRAXIS_TEST_READY_TIMEOUT_MS=30000 cargo llvm-cov --workspace --html --output-dir target/coverage \
-		--exclude praxis-tests-benches \
-		--exclude praxis-tests-conformance \
-		--exclude xtask \
-		--ignore-filename-regex '(target/|tests/|crates/server/src/main\.rs)' \
-		--fail-under-lines 96
+	PRAXIS_TEST_READY_TIMEOUT_MS=30000 cargo llvm-cov $(LLVM_COV_ARGS) --html --output-dir target/coverage
 
 coverage-check:
-	PRAXIS_TEST_READY_TIMEOUT_MS=30000 cargo llvm-cov --workspace --json \
-		--exclude praxis-tests-benches \
-		--exclude praxis-tests-conformance \
-		--exclude xtask \
-		--ignore-filename-regex '(target/|tests/|crates/server/src/main\.rs)' \
-		--fail-under-lines 96 \
-		--output-path coverage.json
+	PRAXIS_TEST_READY_TIMEOUT_MS=30000 cargo llvm-cov $(LLVM_COV_ARGS) --json --output-path target/coverage.json
 
 # -------------------------------------------------------------------
 # Dev Setup
