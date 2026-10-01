@@ -701,8 +701,11 @@ test-config: test-schema
 test-container: | require-container-engine
 	$(CONTAINER_ENGINE) build -t $(IMAGE)-test:$(VERSION) -f Containerfile.test .
 
+# label=disable: on an SELinux host the container can't read the bind-mounted
+# checkout otherwise, and relabeling it (:z) would change the checkout itself.
 test-container-run: test-container
-	$(CONTAINER_ENGINE) run --rm -v $(CURDIR):/src -v praxis-test-cache:/cache \
+	$(CONTAINER_ENGINE) run --rm --security-opt label=disable \
+		-v $(CURDIR):/src -v praxis-test-cache:/cache \
 		$(IMAGE)-test:$(VERSION) 2>&1
 
 # -------------------------------------------------------------------
