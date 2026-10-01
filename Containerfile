@@ -4,7 +4,11 @@
 # Stage 1: Build
 # ------------------------------------------------------------------------------
 
-FROM rust:1.96-alpine3.23 AS builder
+# The Alpine release here must match the runtime stage below, which is what
+# the binary's OpenSSL and musl are linked against. Dependabot bumps the
+# runtime `alpine:` tag but cannot move this tag's `-alpine` suffix, so
+# `make lint` (lint-containers) fails until this line follows.
+FROM rust:1.96-alpine3.24 AS builder
 
 # praxis performs all of its cryptography in the system OpenSSL and links it
 # dynamically, so the musl target must not produce a static executable (the

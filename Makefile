@@ -56,7 +56,7 @@ LINT_EXTRA_CMDS := typos taplo shellcheck actionlint
 	test-security test-security-suite test-resilience \
 	test-config-validation test-config \
 	bench build-benches \
-	lint lint-extra generate-filter-docs fmt doc audit semver publish-dry-run publish \
+	lint lint-containers lint-extra generate-filter-docs fmt doc audit semver publish-dry-run publish \
 	mutants \
 	coverage coverage-check \
 	fuzz fuzz-build \
@@ -725,6 +725,19 @@ lint:
 	cargo xtask sync-example-readme
 	cargo xtask lint-filter-docs
 	$(MAKE) --no-print-directory fips-deps
+	$(MAKE) --no-print-directory lint-containers
+
+# The builder stages must compile against the Alpine release the runtime stage
+# ships. Dependabot bumps the runtime `alpine:X.Y` tag but cannot move the
+# `-alpineX.Y` suffix of a rust image tag, so this fails the Dependabot PR
+# until the builders follow, instead of shipping a mismatched image.
+lint-containers:
+	@runtime=$$(sed -n 's/^FROM alpine:\([0-9.]*\).*/\1/p' Containerfile); \
+	for f in Containerfile Containerfile.test; do \
+		builder=$$(sed -n 's/^FROM rust:[^ ]*-alpine\([0-9.]*\).*/\1/p' $$f); \
+		[ -n "$$runtime" ] && [ "$$builder" = "$$runtime" ] || { \
+			echo "$$f builds on Alpine '$$builder' but the Containerfile runtime is Alpine '$$runtime'"; exit 1; }; \
+	done
 
 lint-extra: check-prereqs-extra
 	typos
