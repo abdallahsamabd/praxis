@@ -319,8 +319,10 @@ fn reload_with_backoff(
     *backoff_ms = next_backoff(reloaded, *backoff_ms);
     if !reloaded {
         tracing::warn!(
+            cert_ok,
+            verifier_ok,
             retry_in_ms = *backoff_ms,
-            "certificate reload failed; retrying after backoff"
+            "certificate or client verifier reload failed; retrying after backoff"
         );
     }
     reloaded
