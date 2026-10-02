@@ -117,6 +117,11 @@ pub enum TlsError {
     )]
     ClientCaWithoutMode,
 
+    /// A cluster `client_cert` sets `server_names` or `default`, which only
+    /// apply to listener certificates.
+    #[error("cluster tls.client_cert does not accept server_names or default; remove them")]
+    ClusterClientCertSelectors,
+
     /// `client_cert_mode` is `request` or `require` but `client_ca` is not set.
     #[error("client_ca is required when client_cert_mode is {mode:?}")]
     MissingClientCa {
