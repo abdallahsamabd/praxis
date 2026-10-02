@@ -119,8 +119,10 @@ Require or request client certificates with
 | `require` | Reject connections without a valid client cert |
 
 `client_ca` is required when mode is `request` or
-`require`. See [tls-mtls-listener] and
-[tls-mtls-listener-request].
+`require`, and `client_ca` requires `client_cert_mode`:
+setting `client_ca` with mode `none` is rejected at
+validation instead of silently ignoring the CA. See
+[tls-mtls-listener] and [tls-mtls-listener-request].
 
 ### Certificate Revocation Lists (CRL)
 
