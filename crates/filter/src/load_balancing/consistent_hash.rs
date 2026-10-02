@@ -2,6 +2,10 @@
 // Copyright (c) 2024 Praxis Contributors
 
 //! Consistent-hash endpoint selection for session affinity.
+//!
+//! This is weighted modulo hashing: a key maps to slot
+//! `fnv1a(key) % Σweight`. Adding or removing an endpoint remaps most keys;
+//! use `ring_hash` or `maglev` for minimal disruption on endpoint changes.
 
 use std::sync::Arc;
 
