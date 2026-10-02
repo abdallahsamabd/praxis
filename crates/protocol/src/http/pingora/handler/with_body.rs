@@ -447,6 +447,7 @@ impl ProxyHttp for PingoraHttpHandler {
 
         let is_upgrade = session.is_upgrade_req();
         upstream_request::strip_hop_by_hop(upstream_request, is_upgrade);
+        upstream_request::restore_te_trailers(upstream_request, &session.req_header().headers);
         upstream_request.strip_reserved_internal();
         upstream_request::apply_authority_override(upstream_request, ctx)?;
         upstream_request::apply_rewritten_path(upstream_request, ctx)?;
