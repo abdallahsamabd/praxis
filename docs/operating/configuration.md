@@ -118,6 +118,16 @@ rather than silently adopted as the baseline.
   listener. Its handler executes only filters of the
   protocol it was started with, so the reload is refused
   until the change is reverted or the process restarts.
+- Grouped TCP listeners (same upstream, cluster and
+  timeouts) whose `filter_chains` or `max_connections`
+  disagree.
+- A change to a bound TCP listener's `upstream`,
+  `cluster`, `tcp_session_timeout_ms` or
+  `tcp_max_duration_secs`, removal of a bound TCP
+  listener, or a change to
+  `insecure_options.allow_private_upstreams` while TCP
+  listeners exist. The TCP service captures these at
+  startup.
 
 Stateful filters (rate limiter, circuit breaker) reset
 their state on reload. Operators should expect a brief
