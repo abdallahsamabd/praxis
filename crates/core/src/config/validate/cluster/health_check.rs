@@ -239,7 +239,8 @@ fn check_ssrf_host(host: &str, cluster_name: &str, addr_str: &str, allowed: bool
     }
     Err(ProxyError::Config(format!(
         "cluster '{cluster_name}': health check endpoint '{addr_str}' resolves to a \
-         sensitive address; set insecure_options.allow_private_health_checks: true to allow"
+         sensitive address; set insecure_options.allow_private_health_checks: true \
+         (and allow_private_endpoints: true for the data plane) to allow"
     )))
 }
 
@@ -902,9 +903,9 @@ clusters:
             }),
             ..Cluster::with_defaults("web", vec!["127.0.0.1:80".into()])
         }];
-        let err = validate_clusters(&clusters, &InsecureOptions::default()).unwrap_err();
+        let err = validate_clusters(&clusters, &data_plane_allowed()).unwrap_err();
         assert!(
-            err.to_string().contains("sensitive address"),
+            err.to_string().contains("health check endpoint"),
             "should reject loopback health check: {err}"
         );
     }
@@ -927,6 +928,7 @@ clusters:
             ..Cluster::with_defaults("web", vec!["127.0.0.1:80".into()])
         }];
         let opts = InsecureOptions {
+            allow_private_endpoints: true,
             allow_private_health_checks: true,
             ..InsecureOptions::default()
         };
@@ -1071,9 +1073,9 @@ clusters:
             }),
             ..Cluster::with_defaults("web", vec!["::ffff:127.0.0.1:80".into()])
         }];
-        let err = validate_clusters(&clusters, &InsecureOptions::default()).unwrap_err();
+        let err = validate_clusters(&clusters, &data_plane_allowed()).unwrap_err();
         assert!(
-            err.to_string().contains("sensitive address"),
+            err.to_string().contains("health check endpoint"),
             "IPv4-mapped loopback should be rejected: {err}"
         );
     }
@@ -1095,9 +1097,9 @@ clusters:
             }),
             ..Cluster::with_defaults("web", vec!["[::1]:80".into()])
         }];
-        let err = validate_clusters(&clusters, &InsecureOptions::default()).unwrap_err();
+        let err = validate_clusters(&clusters, &data_plane_allowed()).unwrap_err();
         assert!(
-            err.to_string().contains("sensitive address"),
+            err.to_string().contains("health check endpoint"),
             "bracketed IPv6 loopback should be rejected: {err}"
         );
     }
@@ -1410,9 +1412,9 @@ clusters:
             }),
             ..Cluster::with_defaults("web", vec!["localhost:80".into()])
         }];
-        let err = validate_clusters(&clusters, &InsecureOptions::default()).unwrap_err();
+        let err = validate_clusters(&clusters, &data_plane_allowed()).unwrap_err();
         assert!(
-            err.to_string().contains("sensitive address"),
+            err.to_string().contains("health check endpoint"),
             "hostname 'localhost' should be rejected: {err}"
         );
     }
@@ -1434,9 +1436,9 @@ clusters:
             }),
             ..Cluster::with_defaults("web", vec!["[fe80::1]:80".into()])
         }];
-        let err = validate_clusters(&clusters, &InsecureOptions::default()).unwrap_err();
+        let err = validate_clusters(&clusters, &data_plane_allowed()).unwrap_err();
         assert!(
-            err.to_string().contains("sensitive address"),
+            err.to_string().contains("health check endpoint"),
             "IPv6 link-local should be rejected: {err}"
         );
     }
@@ -1638,5 +1640,18 @@ clusters:
             !super::is_ssrf_sensitive_hostname("134744072"),
             "decimal 134744072 (8.8.8.8) should NOT be flagged"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Test Utilities
+    // -------------------------------------------------------------------------
+
+    /// Options that pass the data-plane endpoint check, so only the
+    /// health check SSRF gate can reject.
+    fn data_plane_allowed() -> InsecureOptions {
+        InsecureOptions {
+            allow_private_endpoints: true,
+            ..InsecureOptions::default()
+        }
     }
 }
