@@ -36,7 +36,7 @@ use crate::{CipherSuiteId, ClientCertMode, ListenerTls, TlsError, TlsVersion, cl
 /// (more with client certificates), so this costs about a megabyte per
 /// listener. Stateless tickets would avoid the cache, but the OpenSSL provider
 /// has no ticketer and rustls would not check one for FIPS.
-const SESSION_CACHE_ENTRIES: usize = 4_096;
+pub(crate) const SESSION_CACHE_ENTRIES: usize = 4_096;
 
 /// The session cache every listener config uses.
 fn session_storage() -> Arc<dyn StoresServerSessions + Send + Sync> {
@@ -196,7 +196,10 @@ pub fn build_reloadable_server_config(
     let cert_handle = resolver.arc();
 
     let config = builder.with_cert_resolver(Arc::new(resolver));
-    let config = finish_server_config(config, advertise_http_alpn)?;
+    let mut config = finish_server_config(config, advertise_http_alpn)?;
+    if let Some(handle) = &verifier_handle {
+        config.session_storage = Arc::new(crate::reload::VerifierBoundSessions(Arc::clone(handle)));
+    }
 
     Ok(ReloadableServerConfig {
         config: Arc::new(config),
@@ -846,6 +849,38 @@ mod tests {
             "ALPN should include h2 and http/1.1"
         );
         assert!(result.verifier_handle.is_none(), "no mTLS means no verifier handle");
+    }
+
+    #[test]
+    #[cfg(feature = "config-reload")]
+    fn build_reloadable_server_config_mtls_binds_session_cache() -> Result<(), Box<dyn std::error::Error>> {
+        ensure_crypto_provider();
+        let certs = gen_test_certs();
+        let tls = ListenerTls {
+            certificates: vec![CertKeyPair {
+                cert_path: certs.cert_path.to_str().ok_or("cert path is not UTF-8")?.to_owned(),
+                default: false,
+                key_path: certs.key_path.to_str().ok_or("key path is not UTF-8")?.to_owned(),
+                server_names: Vec::new(),
+            }],
+            cipher_suites: None,
+            client_ca: Some(CaConfig {
+                ca_path: certs.ca_cert_path.to_str().ok_or("CA path is not UTF-8")?.to_owned(),
+                crl_paths: Vec::new(),
+            }),
+            client_cert_mode: ClientCertMode::Require,
+            trusted_spiffe_ids: Vec::new(),
+            hot_reload: None,
+            min_version: None,
+        };
+
+        let result = build_reloadable_server_config(&tls, true)?;
+        assert!(result.verifier_handle.is_some(), "mTLS should expose a verifier handle");
+        assert!(
+            result.config.session_storage.can_cache(),
+            "verifier-bound session storage should cache sessions"
+        );
+        Ok(())
     }
 
     #[test]

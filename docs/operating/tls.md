@@ -150,6 +150,10 @@ not implemented, so `tls.ca.crl_paths` on a cluster
 definition is rejected at config validation rather
 than silently ignored.
 
+A CA/CRL reload invalidates all cached TLS sessions
+on that listener, so resumed sessions are re-verified
+against the new CA and CRLs.
+
 ### Local dev with mkcert
 
 ```console
