@@ -30,7 +30,7 @@ use super::{
     compression::{adjust_compression, configure_compression},
     connected_to_upstream, fail_to_proxy,
     health_util::{ended_by_client, record_passive_health},
-    hop_by_hop::RemoveHeader as _,
+    hop_by_hop::{self, RemoveHeader as _},
     logging_util::{logging_cleanup, maybe_emit_fallback_access_log},
     metrics_util::emit_request_metrics,
     request_body_filter, request_filter, response_body_filter, response_filter, response_trailer_filter,
@@ -295,6 +295,7 @@ impl ProxyHttp for PingoraHttpHandler {
     {
         let span = ctx.request_span.clone();
         let _entered = span.enter();
+        hop_by_hop::strip_reserved_internal_header_map(upstream_trailers);
         response_trailers::capture(upstream_trailers, ctx);
         Ok(())
     }
@@ -314,7 +315,9 @@ impl ProxyHttp for PingoraHttpHandler {
         }
         let span = ctx.request_span.clone();
         let _entered = span.enter();
-        Ok(response_trailer_filter::execute(&pipeline, upstream_trailers, ctx))
+        let produced = response_trailer_filter::execute(&pipeline, upstream_trailers, ctx);
+        hop_by_hop::strip_reserved_internal_header_map(upstream_trailers);
+        Ok(produced)
     }
 
     fn response_body_filter(
