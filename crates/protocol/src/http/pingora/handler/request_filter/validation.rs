@@ -47,7 +47,8 @@ pub(super) fn validate_host_header(session: &mut Session) -> Option<Rejection> {
 enum HostCheck {
     /// Single valid host header present (or absent on HTTP/1.0).
     Valid,
-    /// Duplicate identical hosts; caller should collapse to one.
+    /// Duplicate identical hosts; caller should collapse to one. Defence in
+    /// depth: the Pingora fork already rejects duplicate Host headers.
     Canonicalize(http::HeaderValue),
     /// Reject with the given status.
     Reject(Rejection),
@@ -73,6 +74,11 @@ fn check_host_values(version: http::Version, hosts: &http::header::GetAll<'_, ht
         return HostCheck::Reject(Rejection::status(400));
     }
 
+    if !is_valid_host_grammar(first) {
+        debug!("rejecting request with malformed Host header");
+        return HostCheck::Reject(Rejection::status(400));
+    }
+
     let Some(second) = iter.next() else {
         return HostCheck::Valid;
     };
@@ -90,6 +96,49 @@ fn check_host_values(version: http::Version, hosts: &http::header::GetAll<'_, ht
     }
 
     HostCheck::Canonicalize(first.clone())
+}
+
+/// Whether a Host value matches `uri-host [ ":" port ]` per
+/// [RFC 9110 Section 7.2].
+///
+/// Parsing as an [`Authority`] rejects whitespace, path delimiters and
+/// stray colons; userinfo is not part of the Host grammar. [`Authority`]
+/// does not validate the port text at all, so the port (possibly empty,
+/// as `port = *DIGIT` allows) is checked separately, as is anything
+/// trailing an IP-literal's closing bracket.
+///
+/// [RFC 9110 Section 7.2]: https://datatracker.ietf.org/doc/html/rfc9110#section-7.2
+/// [`Authority`]: http::uri::Authority
+fn is_valid_host_grammar(value: &http::HeaderValue) -> bool {
+    let Ok(authority) = http::uri::Authority::try_from(value.as_bytes()) else {
+        return false;
+    };
+    let text = authority.as_str();
+    if text.contains('@') {
+        return false;
+    }
+
+    let port = if text.starts_with('[') {
+        let Some((_, rest)) = text.split_once(']') else {
+            return false;
+        };
+        if rest.is_empty() {
+            return true;
+        }
+        let Some(port) = rest.strip_prefix(':') else {
+            return false;
+        };
+        port
+    } else if text.contains(['[', ']']) {
+        return false;
+    } else {
+        let Some((_, port)) = text.split_once(':') else {
+            return true;
+        };
+        port
+    };
+
+    port.is_empty() || (port.bytes().all(|byte| byte.is_ascii_digit()) && port.parse::<u16>().is_ok())
 }
 
 // -----------------------------------------------------------------------------
@@ -248,6 +297,40 @@ mod tests {
             matches!(result, HostCheck::Valid),
             "HTTP/2 without Host should be allowed"
         );
+    }
+
+    fn single_host_check(value: &'static str) -> HostCheck {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::HOST, http::HeaderValue::from_static(value));
+        check_host_values(http::Version::HTTP_11, &headers.get_all(http::header::HOST))
+    }
+
+    #[test]
+    fn malformed_host_grammar_rejected() {
+        for value in ["a b", "h/p", "h:abc", "h:99999", "h:+80", "user@h", "[::1]x", "a[::1]"] {
+            assert!(
+                matches!(single_host_check(value), HostCheck::Reject(_)),
+                "malformed Host {value:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn well_formed_host_grammar_accepted() {
+        for value in [
+            "example.com",
+            "example.com.",
+            "example.com:443",
+            "example.com:",
+            "[::1]",
+            "[::1]:8080",
+            "localhost",
+        ] {
+            assert!(
+                matches!(single_host_check(value), HostCheck::Valid),
+                "well-formed Host {value:?} must be accepted"
+            );
+        }
     }
 
     // -------------------------------------------------------------------------
