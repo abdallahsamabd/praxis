@@ -717,6 +717,11 @@ shutdown:
 shutdown_timeout_secs: 60    # default: 30
 ```
 
+On SIGTERM listeners stop accepting new connections. The
+first up-to-5 s is a grace period in which in-flight
+requests keep running; the remainder bounds the runtime
+drain; the total never exceeds `shutdown_timeout_secs`.
+
 Once the drain completes, Praxis flushes queued log lines
 and exports pending OTLP spans, then exits `0`. A startup
 failure after logging is initialized (a listener that
