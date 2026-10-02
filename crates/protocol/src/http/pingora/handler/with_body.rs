@@ -473,6 +473,7 @@ impl ProxyHttp for PingoraHttpHandler {
         let pipeline = ctx.pipeline(&self.pipeline);
         let span = ctx.request_span.clone();
         let exchange_span = ctx.upstream_exchange_span.clone();
+        let upstream_ver = upstream_response.version;
         let result = response_filter::execute(&pipeline, upstream_response, ctx)
             .instrument(exchange_span)
             .instrument(span)
@@ -480,8 +481,8 @@ impl ProxyHttp for PingoraHttpHandler {
         if result.is_ok() {
             // RFC 9110 §7.6.3: the response Via received-protocol is the leg this
             // proxy received the response on — the upstream connection — not the
-            // downstream client's version.
-            let upstream_ver = upstream_response.version;
+            // downstream client's version, captured before filters can rebuild
+            // the header.
             via::append_response_via(upstream_response, upstream_ver);
             adjust_compression(session, upstream_response, pipeline.compression_config());
         }
