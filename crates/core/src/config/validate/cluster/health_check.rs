@@ -103,6 +103,13 @@ fn validate_health_check_timing(hc: &crate::config::HealthCheckConfig, cluster_n
             "cluster '{cluster_name}': health check interval_ms must be > 0"
         )));
     }
+    if hc.interval_ms > super::MAX_TIMEOUT_MS {
+        return Err(ProxyError::Config(format!(
+            "cluster '{cluster_name}': health check interval_ms ({}) exceeds maximum ({} ms / 1 hour)",
+            hc.interval_ms,
+            super::MAX_TIMEOUT_MS
+        )));
+    }
     if hc.timeout_ms == 0 {
         return Err(ProxyError::Config(format!(
             "cluster '{cluster_name}': health_check.timeout_ms must be greater than 0"
@@ -944,6 +951,29 @@ clusters:
             ..InsecureOptions::default()
         };
         validate_clusters(&clusters, &opts).expect("allow_private_health_checks should demote error to warning");
+    }
+
+    #[test]
+    fn health_check_interval_upper_bound() {
+        for (interval_ms, accepted) in [(3_600_000, true), (3_600_001, false)] {
+            let clusters = vec![Cluster {
+                health_check: Some(crate::config::HealthCheckConfig {
+                    check_type: crate::config::HealthCheckType::Http,
+                    expected_status: 200,
+                    grpc_service: String::new(),
+                    healthy_threshold: 2,
+                    interval_ms,
+                    passive_healthy_threshold: None,
+                    passive_unhealthy_threshold: None,
+                    path: "/health".to_owned(),
+                    timeout_ms: 2000,
+                    unhealthy_threshold: 3,
+                }),
+                ..Cluster::with_defaults("web", vec!["10.0.0.1:80".into()])
+            }];
+            let result = validate_clusters(&clusters, &InsecureOptions::default());
+            assert_eq!(result.is_ok(), accepted, "interval_ms {interval_ms}: {result:?}");
+        }
     }
 
     #[test]
