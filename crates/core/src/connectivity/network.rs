@@ -109,7 +109,7 @@ pub fn is_private_ip(ip: &IpAddr) -> bool {
 /// On a DNS64 network a public name that resolves to a private IPv4 address
 /// is synthesized as `64:ff9b::a.b.c.d`; unwrapping it keeps the runtime
 /// rebinding check from being bypassed that way.
-pub(crate) fn is_private_upstream_ip(ip: &IpAddr) -> bool {
+pub fn is_private_upstream_ip(ip: &IpAddr) -> bool {
     let class = classify_ip(ip);
     class.is_loopback()
         || class.is_private_network()

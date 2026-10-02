@@ -20,7 +20,7 @@ use std::{
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use pingora_core::{apps::ServerApp, protocols::Stream, server::ShutdownWatch};
-use praxis_core::connectivity::is_private_ip;
+use praxis_core::connectivity::is_private_upstream_ip;
 use praxis_filter::{FilterAction, FilterPipeline, TcpFilterContext};
 use praxis_tls::sni;
 use tokio::{
@@ -918,12 +918,13 @@ async fn resolve_and_connect(upstream_addr: &str, allow_private: bool) -> Option
 
 /// Return the first private/reserved IP among resolved socket addresses.
 ///
-/// Uses [`is_private_ip`] which handles IPv4-mapped IPv6 normalization
-/// internally, so `::ffff:10.0.0.1` is correctly identified.
+/// Uses [`is_private_upstream_ip`], which normalizes IPv4-mapped IPv6 and
+/// unwraps NAT64 (`64:ff9b::/96`) answers, so `::ffff:10.0.0.1` and
+/// `64:ff9b::a00:1` are both identified as private.
 ///
-/// [`is_private_ip`]: praxis_core::connectivity::is_private_ip
+/// [`is_private_upstream_ip`]: praxis_core::connectivity::is_private_upstream_ip
 fn find_private_addr(addrs: &[SocketAddr]) -> Option<std::net::IpAddr> {
-    addrs.iter().map(SocketAddr::ip).find(is_private_ip)
+    addrs.iter().map(SocketAddr::ip).find(is_private_upstream_ip)
 }
 
 /// Resolve a listener metrics label from the connection local address.
