@@ -30,7 +30,7 @@
 //!
 //! # Token refill and admission
 //!
-//! Tokens refill continuously based on wall-clock time since the last refill,
+//! Tokens refill continuously based on monotonic time since the last refill,
 //! using atomic compare-exchange loops to handle concurrent callers. The refill
 //! rate is `min_retries_per_second` tokens per second, capped at
 //! `max_tokens(active_requests)`. Acquiring a token is a single atomic decrement
@@ -39,7 +39,13 @@
 //! When no budget is configured for a cluster, an unlimited budget is used that
 //! always admits retries (the legacy behavior, retained for compatibility).
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Instant,
+};
 
 use crate::config::RetryBudgetConfig;
 
@@ -58,7 +64,7 @@ pub struct RetryBudget {
     percent: f64,
     /// Floor rate for token refill and minimum cap.
     min_retries_per_second: u32,
-    /// Milliseconds since the unix epoch of the last refill.
+    /// Monotonic milliseconds (see [`now_ms`]) of the last refill.
     last_refill_ms: AtomicU64,
 }
 
@@ -110,17 +116,35 @@ impl RetryBudget {
     /// recomputes the cap per call even when nothing accrued; it is one
     /// float multiply and a load, cheaper than admitting from stale tokens.
     pub fn refill(&self, active_requests: u64) {
-        let now = now_ms();
+        self.refill_at(now_ms(), active_requests);
+    }
+
+    /// [`Self::refill`] at an explicit monotonic time `now` in milliseconds.
+    ///
+    /// A successful accrual advances `last_refill_ms` only by the time the
+    /// accrued tokens account for, so the fractional remainder carries over
+    /// to the next call instead of being dropped.
+    fn refill_at(&self, now: u64, active_requests: u64) {
         let last = self.last_refill_ms.load(Ordering::Relaxed);
         let elapsed_ms = now.saturating_sub(last);
         let accrued = u64::from(self.min_retries_per_second).saturating_mul(elapsed_ms) / 1000;
+        // Round up so the carried remainder never exceeds the true
+        // fraction; rounding down would over-accrue by up to 1 ms per call.
+        let consumed_ms = std::num::NonZeroU64::new(u64::from(self.min_retries_per_second))
+            .map_or(elapsed_ms, |rate| accrued.saturating_mul(1000).div_ceil(rate.get()))
+            .min(elapsed_ms);
 
         // Only one refiller should advance last_refill; losers add nothing
         // but still clamp to the current cap.
         let tokens_to_add = if accrued > 0
             && self
                 .last_refill_ms
-                .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+                .compare_exchange(
+                    last,
+                    last.saturating_add(consumed_ms),
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                )
                 .is_ok()
         {
             accrued
@@ -178,12 +202,13 @@ impl RetryBudget {
     }
 }
 
-/// Returns the current wall-clock time as milliseconds since the unix epoch.
+/// Returns monotonic milliseconds since a process-local base.
+///
+/// Immune to wall-clock jumps; only ever stored and subtracted within
+/// this module, never compared to epoch time.
 fn now_ms() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |dur| u64::try_from(dur.as_millis()).unwrap_or(u64::MAX))
+    static BASE: OnceLock<Instant> = OnceLock::new();
+    u64::try_from(BASE.get_or_init(Instant::now).elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 // -----------------------------------------------------------------------------
@@ -264,6 +289,17 @@ mod tests {
             percent: BudgetPercent::try_from(percent).unwrap(),
             min_retries_per_second: min_rps,
         })
+    }
+
+    #[test]
+    fn refill_carries_fractional_remainder() {
+        let b = budget(20.0, 3);
+        while b.try_acquire() {}
+        b.last_refill_ms.store(0, Ordering::Relaxed);
+        for now in [300, 600, 900, 1200] {
+            b.refill_at(now, 0);
+        }
+        assert_eq!(b.available(), 3, "1.2 s at 3 tokens/s should accrue 3 tokens");
     }
 
     #[test]
