@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024 Praxis Contributors
 
-//! Host header validation and Max-Forwards handling per [RFC 9110]/[RFC 9112].
+//! Host header, request path, and Max-Forwards validation per [RFC 9110]/[RFC 9112].
 //!
 //! [RFC 9110]: https://datatracker.ietf.org/doc/html/rfc9110
 //! [RFC 9112]: https://datatracker.ietf.org/doc/html/rfc9112
@@ -142,6 +142,32 @@ fn is_valid_host_grammar(value: &http::HeaderValue) -> bool {
 }
 
 // -----------------------------------------------------------------------------
+// Request Path Validation
+// -----------------------------------------------------------------------------
+
+/// Reject request paths containing `..` segments.
+///
+/// Routing and path-conditioned filters match the raw request path,
+/// while upstreams typically resolve dot-segments per
+/// [RFC 3986 Section 5.2.4]. A path like `/public/../admin` would
+/// therefore match a `/public` route yet reach `/admin` upstream.
+/// Rejecting these paths up front closes that gap for every filter.
+/// Percent-encoded dot variants (`%2e%2e`) are rejected too.
+///
+/// [RFC 3986 Section 5.2.4]: https://datatracker.ietf.org/doc/html/rfc3986#section-5.2.4
+pub(super) fn validate_request_path(session: &Session) -> Option<Rejection> {
+    check_request_path(session.req_header().uri.path())
+}
+
+/// Pure path check behind [`validate_request_path`].
+fn check_request_path(path: &str) -> Option<Rejection> {
+    praxis_filter::has_dot_dot_traversal(path).then(|| {
+        debug!("rejecting request path with dot-dot segment");
+        Rejection::status(400)
+    })
+}
+
+// -----------------------------------------------------------------------------
 // Max-Forwards (RFC 9110 Section 7.6.2)
 // -----------------------------------------------------------------------------
 
@@ -197,6 +223,47 @@ fn parse_max_forwards(session: &Session) -> Option<u32> {
 #[allow(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
+
+    // -------------------------------------------------------------------------
+    // Request Path Validation
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn dot_dot_path_rejected() {
+        assert!(
+            check_request_path("/a/../b").is_some_and(|r| r.status == 400),
+            "dot-dot segment should be rejected with 400"
+        );
+    }
+
+    #[test]
+    fn encoded_dot_dot_path_rejected() {
+        assert!(
+            check_request_path("/a/%2e%2e/b").is_some_and(|r| r.status == 400),
+            "percent-encoded dot-dot segment should be rejected with 400"
+        );
+    }
+
+    #[test]
+    fn route_escape_path_rejected() {
+        assert!(
+            check_request_path("/public/../admin").is_some(),
+            "path escaping a prefix route should be rejected"
+        );
+    }
+
+    #[test]
+    fn plain_and_double_slash_paths_accepted() {
+        assert!(
+            check_request_path("/a/b..c/d").is_none(),
+            "dots inside a segment are allowed"
+        );
+        assert!(
+            check_request_path("//etc/passwd").is_none(),
+            "double slash is left to routing"
+        );
+        assert!(check_request_path("/a/./b").is_none(), "single-dot segment is allowed");
+    }
 
     // -------------------------------------------------------------------------
     // Host Header Validation (RFC 9110 §7.2 / RFC 9112 §3.2)

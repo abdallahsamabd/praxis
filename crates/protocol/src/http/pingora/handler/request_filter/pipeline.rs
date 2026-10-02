@@ -107,6 +107,12 @@ pub(in crate::http) async fn execute(
         return Ok(true);
     }
 
+    if let Some(rejection) = super::validation::validate_request_path(session) {
+        snapshot_for_early_exit(session, ctx);
+        send_rejection_for(session, rejection, ctx).await;
+        return Ok(true);
+    }
+
     if let Some(rejection) = super::super::normalize::normalize_request_headers(session) {
         snapshot_for_early_exit(session, ctx);
         send_rejection_for(session, rejection, ctx).await;
