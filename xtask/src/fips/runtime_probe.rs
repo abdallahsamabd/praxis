@@ -38,6 +38,8 @@ use openssl::{
     },
 };
 
+use crate::paths::workspace_root;
+
 // -----------------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------------
@@ -304,12 +306,6 @@ fn toolchain_cargo_test(toolchain_image: &str, addr: &str, work: &Path) -> std::
         .status()
 }
 
-/// The workspace root, two levels up from xtask's manifest.
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
-}
 
 // -----------------------------------------------------------------------------
 // Startup Line

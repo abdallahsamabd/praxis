@@ -6,6 +6,8 @@
 
 use clap::Parser;
 
+use crate::paths::workspace_root;
+
 // -----------------------------------------------------------------------------
 // Allowlist
 // -----------------------------------------------------------------------------
@@ -141,14 +143,6 @@ fn walk_dir(base: &std::path::Path, root: &std::path::Path, ext: &str, out: &mut
     }
 }
 
-/// Locate the workspace root directory.
-fn workspace_root() -> std::path::PathBuf {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_owned());
-    std::path::Path::new(&manifest_dir)
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .to_owned()
-}
 
 // -----------------------------------------------------------------------------
 // Tests
