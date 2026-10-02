@@ -276,7 +276,8 @@ impl Default for BackoffConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetryBudgetConfig {
-    /// Maximum retries as a percentage of active requests (0.0..=100.0).
+    /// Caps accumulated retry tokens (burst) at this percentage of in-flight requests (0.0..=100.0); the sustained
+    /// rate is `min_retries_per_second`.
     pub percent: BudgetPercent,
     /// Floor on tokens per second even at low traffic.
     #[serde(default = "default_min_retries_per_second")]

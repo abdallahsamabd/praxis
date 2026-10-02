@@ -11,16 +11,14 @@
 //! # How it works
 //!
 //! Each cluster gets a [`RetryBudget`](crate::retry::RetryBudget) that acts as a token-bucket rate limiter.
-//! Tokens refill at a minimum floor rate (`min_retries_per_second`) and are
-//! capped at a percentage of the cluster's active request count. When a request
-//! needs to retry, it must acquire a token first; if the bucket is empty, the
-//! retry is rejected and the error is returned to the client immediately.
+//! When a request needs to retry, it must acquire a token first; if the bucket
+//! is empty, the retry is rejected and the error is returned to the client
+//! immediately.
 //!
-//! The dynamic cap (`percent` of active requests) means retry capacity scales
-//! with legitimate traffic: a healthy cluster handling 1000 req/s with a 20%
-//! budget can retry up to 200 req/s, but when traffic drops to 100 req/s during
-//! an incident, retry capacity drops to 20 req/s. This prevents retries from
-//! dominating the request mix when a backend is already struggling.
+//! Tokens refill at `min_retries_per_second`; `percent` of the cluster's
+//! in-flight requests (floored at `min_retries_per_second`) caps how many
+//! tokens can accumulate, i.e. the burst size. Under sustained failure the
+//! steady retry rate is `min_retries_per_second`.
 //!
 //! # Why per-cluster
 //!
