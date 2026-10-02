@@ -182,6 +182,11 @@ impl VerifierState {
 /// - CRL changes never affect root hints.
 /// - CA changes update the verification logic; hints are advisory and stale hints do not weaken security.
 ///
+/// After a CA *replacement*, however, the `CertificateRequest` keeps
+/// advertising the old CA names until restart. Clients that filter their
+/// certificates by CA name (browsers, Java) may then offer no certificate,
+/// so operators should rotate with a bundle holding both the old and new CA.
+///
 /// ```ignore
 /// let verifier = ReloadableClientVerifier::new(
 ///     "/etc/ssl/client-ca.pem",

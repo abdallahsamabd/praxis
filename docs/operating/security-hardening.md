@@ -25,8 +25,9 @@ ambiguous configuration:
   [Admin DNS Rebinding](#admin-dns-rebinding)).
 - `unsafe_code = "deny"` in workspace lints; no unsafe
   Rust in the Praxis codebase.
-- Rustls for TLS (no OpenSSL, no C FFI in the TLS
-  path).
+- Rustls protocol state machine for TLS;
+  cryptography via the system OpenSSL
+  (rustls-openssl provider).
 - TLS certificate and key paths reject directory
   traversal (`..`).
 - Health check targets reject loopback, link-local,
@@ -159,6 +160,10 @@ relying on the bind address.
   `crl_paths` to the `client_ca` block. CRL paths
   reject directory traversal (`..`). See
   [tls.md](tls.md) for configuration details.
+- CRL and client CA files reload only on listeners
+  with exactly one certificate and `hot_reload` not
+  set to `false`. Every other listener needs a
+  restart to pick up a new CRL.
 
 ## Access Control
 

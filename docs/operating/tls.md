@@ -154,6 +154,28 @@ A CA/CRL reload invalidates all cached TLS sessions
 on that listener, so resumed sessions are re-verified
 against the new CA and CRLs.
 
+CRL and CA files reload only on listeners with
+exactly one certificate and `hot_reload` not set to
+`false`. Every other listener needs a restart to
+pick up a new CRL.
+
+Revocation policy:
+
+- CRLs are checked for the whole chain, not only the
+  leaf certificate.
+- When CRLs are configured, a certificate whose
+  issuer has no CRL is rejected (unknown revocation
+  status is denied).
+- A CRL past its `nextUpdate` is still accepted, so
+  operators must refresh CRL files themselves.
+
+After a CA *replacement* (not a CRL update), the
+`CertificateRequest` still advertises the old CA
+names until restart. Clients that filter their
+certificates by CA name (browsers, Java) may then
+offer no certificate. During rotation, use a CA
+bundle that holds both the old and the new CA.
+
 ### Local dev with mkcert
 
 ```console
