@@ -591,10 +591,10 @@ runtime:
   - `consecutive_failures`: failure threshold before the
     circuit opens (required, must be > 0).
   - `recovery_window_secs`: seconds the circuit stays
-    open before allowing a probe (required, must be > 0).
+    open before allowing a probe (required, 1..=3600).
   - `half_open_timeout_secs`: seconds a half-open probe
     may remain in-flight before the circuit resets to open
-    (default 30).
+    (default 30, 1..=3600).
 
   The circuit breaker state is preserved across config
   reloads. Use the `transport_error: circuit_open`
