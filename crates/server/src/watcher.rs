@@ -395,12 +395,17 @@ fn handle_reload(
 
 /// Path-based event filter for the config file watcher.
 ///
-/// When the config file is itself a symlink (Kubernetes `ConfigMap`
-/// mounts, release-symlink deployments), all directory events are
+/// When the config file is itself a symlink (a file symlink, or the
+/// Kubernetes `ConfigMap` `..data` layout), all directory events are
 /// accepted because symlink-target rotations produce events for
 /// intermediate paths (e.g. `..data`) that cannot be predicted at
 /// startup. The content-hash check in [`handle_reload`] prevents
 /// unnecessary pipeline rebuilds.
+///
+/// Release-symlink layouts where a *directory* on the config path is
+/// swapped (e.g. `/srv/current -> releases/v2`) are not detected: the
+/// watched directory is resolved once at startup, so such swaps need a
+/// restart.
 ///
 /// When the config is a regular file, events are filtered against
 /// both the original and canonical paths for cross-platform
