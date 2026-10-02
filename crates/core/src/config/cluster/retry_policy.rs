@@ -22,7 +22,7 @@ pub const DEFAULT_MAX_RETRIES: u32 = 3;
 pub const MAX_EFFECTIVE_RETRIES: u32 = 15;
 
 /// Default body replay limit matching Pingora's fixed retry buffer (64 `KiB`).
-pub const DEFAULT_RETRY_BODY_LIMIT_BYTES: u64 = 65_536;
+pub const DEFAULT_RETRY_BODY_LIMIT_BYTES: u64 = 65_536; // 64 KiB
 
 /// Hard upper bound for the retry body buffer.
 ///
