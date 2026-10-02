@@ -960,7 +960,7 @@ mod tests {
         assert_eq!(
             req.headers.get("transfer-encoding").unwrap(),
             "chunked",
-            "compound transfer codings ending in chunked are normalized to plain chunked"
+            "compound codings are rejected with 501 in request_filter; the strip itself still normalizes to chunked"
         );
     }
 

@@ -28,7 +28,10 @@ use super::{
     body_handling::{selected_upstream_body_limit, store_adapted_request_body, store_canonical_request_body},
     error_handling::handle_pre_read_io_error,
     header_mutations::{apply_pending_header_mutations, apply_pre_read_mutations},
-    request_utils::{create_request_span, reject_reserved_internal_headers, snapshot_for_early_exit, templated_route},
+    request_utils::{
+        create_request_span, reject_reserved_internal_headers, reject_unsupported_transfer_coding,
+        snapshot_for_early_exit, templated_route,
+    },
     stream_buffer::PreReadError,
     terminal_responses::{run_streaming_terminal_response, run_terminal_response},
 };
@@ -92,6 +95,12 @@ pub(in crate::http) async fn execute(
     // Stale upstream-contact state from a prior keep-alive request is cleared in
     // early_request_filter (the first per-request hook), before any rejection
     // path, so it cannot leak into this request's passive-health attribution.
+    if let Some(rejection) = reject_unsupported_transfer_coding(session) {
+        snapshot_for_early_exit(session, ctx);
+        send_rejection_for(session, rejection, ctx).await;
+        return Ok(true);
+    }
+
     if let Some(rejection) = super::validation::validate_host_header(session) {
         snapshot_for_early_exit(session, ctx);
         send_rejection_for(session, rejection, ctx).await;
