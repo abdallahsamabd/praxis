@@ -280,6 +280,7 @@ async fn run_pipeline(
         attempted_endpoints,
         retry_policy,
         route_retry_policy,
+        hedge_policy,
         cluster_retry_state,
         cluster_retry_state_released,
         endpoint_reselector,
@@ -389,6 +390,7 @@ async fn run_pipeline(
             filter_ctx.attempted_endpoints,
             filter_ctx.retry_policy,
             filter_ctx.route_retry_policy,
+            filter_ctx.hedge_policy,
             filter_ctx.cluster_retry_state,
             filter_ctx.cluster_retry_state_released,
             filter_ctx.endpoint_reselector,
@@ -458,6 +460,7 @@ async fn run_pipeline(
             ctx.attempted_endpoints = attempted_endpoints;
             ctx.retry_policy = retry_policy;
             ctx.route_retry_policy = route_retry_policy;
+            ctx.hedge_policy = hedge_policy;
             if let Some(CanonicalRequestBody(body)) = canonical_body {
                 store_canonical_request_body(ctx, body);
             }

@@ -342,6 +342,9 @@ pub struct PingoraRequestCtx {
     /// Optional route-level retry policy override (merged by the load balancer).
     pub route_retry_policy: Option<Arc<praxis_core::config::RetryPolicy>>,
 
+    /// Per-route hedge policy copied from the filter context.
+    pub hedge_policy: Option<Arc<praxis_core::config::HedgePolicy>>,
+
     /// Shared cluster retry state (budget + active requests).
     pub cluster_retry_state: Option<Arc<praxis_core::retry::ClusterRetryState>>,
 
@@ -449,6 +452,7 @@ macro_rules! filter_context {
             attempted_endpoints: std::mem::take(&mut $ctx.attempted_endpoints),
             retry_policy: $ctx.retry_policy.clone(),
             route_retry_policy: $ctx.route_retry_policy.clone(),
+            hedge_policy: $ctx.hedge_policy.clone(),
             cluster_retry_state: $ctx.cluster_retry_state.clone(),
             cluster_retry_state_released: $ctx.cluster_retry_state_released,
             endpoint_reselector: $ctx.endpoint_reselector.clone(),
@@ -650,6 +654,7 @@ impl Default for PingoraRequestCtx {
             attempted_endpoints: Vec::new(),
             retry_policy: None,
             route_retry_policy: None,
+            hedge_policy: None,
             cluster_retry_state: None,
             cluster_retry_state_released: false,
             endpoint_reselector: None,

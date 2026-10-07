@@ -38,6 +38,8 @@ pub mod fd;
 pub mod grpc;
 /// Shared health state types for active health checking.
 pub mod health;
+/// Hedge-copy admission budget.
+pub mod hedge;
 /// Per-instance request ID generation.
 pub mod id;
 /// Key-value store trait and registry.
