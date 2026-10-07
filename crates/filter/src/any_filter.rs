@@ -35,6 +35,15 @@ impl AnyFilter {
         }
     }
 
+    /// Attach slow-start tables for this filter when the pipeline is installed.
+    #[cfg(feature = "slow-start")]
+    pub fn bind_slow_start(&self, registry: &std::sync::Arc<crate::SlowStartRegistry>) {
+        match self {
+            Self::Http(f) => f.bind_slow_start(registry),
+            Self::Tcp(f) => f.bind_slow_start(registry),
+        }
+    }
+
     /// Filesystem paths this filter reads configuration from, beyond the main
     /// Praxis config. Empty for TCP filters, which have no such surface.
     pub fn referenced_files(&self) -> Vec<std::path::PathBuf> {

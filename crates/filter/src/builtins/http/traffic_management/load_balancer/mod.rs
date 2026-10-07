@@ -92,6 +92,13 @@ pub struct LoadBalancerFilter {
 
     /// Where the target cluster name comes from for each request.
     cluster_source: ClusterSource,
+
+    /// Slow-start bindings held for the lifetime of this pipeline.
+    ///
+    /// Filled at construction and attached when the pipeline is installed.
+    /// Selection does not read them yet.
+    #[cfg(feature = "slow-start")]
+    ramps: std::sync::Mutex<Vec<crate::load_balancing::slow_start::SlowStartBinding>>,
 }
 
 /// Where a load balancer reads the target cluster name for a request.
@@ -174,6 +181,8 @@ impl LoadBalancerFilter {
         Ok(Self {
             clusters: map,
             cluster_source,
+            #[cfg(feature = "slow-start")]
+            ramps: std::sync::Mutex::new(slow_start_bindings(clusters)),
         })
     }
 
@@ -275,6 +284,15 @@ impl LoadBalancerFilter {
     }
 }
 
+/// Bindings for clusters that configure a strategy which consumes the ramp.
+#[cfg(feature = "slow-start")]
+fn slow_start_bindings(clusters: &[Cluster]) -> Vec<crate::load_balancing::slow_start::SlowStartBinding> {
+    clusters
+        .iter()
+        .filter_map(crate::load_balancing::slow_start::binding_for_cluster)
+        .collect()
+}
+
 #[async_trait]
 #[expect(
     clippy::too_many_lines,
@@ -283,6 +301,13 @@ impl LoadBalancerFilter {
 impl HttpFilter for LoadBalancerFilter {
     fn name(&self) -> &'static str {
         "load_balancer"
+    }
+
+    #[cfg(feature = "slow-start")]
+    fn bind_slow_start(&self, registry: &Arc<crate::SlowStartRegistry>) {
+        let mut ramps = self.ramps.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let pending = std::mem::take(&mut *ramps);
+        *ramps = pending.into_iter().map(|binding| binding.open(registry)).collect();
     }
 
     fn load_balancer_clusters(&self) -> Vec<String> {

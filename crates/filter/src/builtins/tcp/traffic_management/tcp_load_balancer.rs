@@ -81,6 +81,10 @@ struct TcpLoadBalancerConfig {
 pub struct TcpLoadBalancerFilter {
     /// Per-cluster resolved strategy.
     clusters: HashMap<Arc<str>, Strategy>,
+
+    /// Slow-start bindings held for the lifetime of this pipeline.
+    #[cfg(feature = "slow-start")]
+    ramps: std::sync::Mutex<Vec<crate::load_balancing::slow_start::SlowStartBinding>>,
 }
 
 impl TcpLoadBalancerFilter {
@@ -101,7 +105,11 @@ impl TcpLoadBalancerFilter {
                 (Arc::clone(&c.name), strategy)
             })
             .collect();
-        Self { clusters: map }
+        Self {
+            clusters: map,
+            #[cfg(feature = "slow-start")]
+            ramps: std::sync::Mutex::new(slow_start_bindings(clusters)),
+        }
     }
 
     /// Create a TCP load balancer from parsed YAML config.
@@ -134,10 +142,26 @@ impl TcpLoadBalancerFilter {
     }
 }
 
+/// Bindings for clusters that configure a strategy which consumes the ramp.
+#[cfg(feature = "slow-start")]
+fn slow_start_bindings(clusters: &[Cluster]) -> Vec<crate::load_balancing::slow_start::SlowStartBinding> {
+    clusters
+        .iter()
+        .filter_map(crate::load_balancing::slow_start::binding_for_cluster)
+        .collect()
+}
+
 #[async_trait]
 impl TcpFilter for TcpLoadBalancerFilter {
     fn name(&self) -> &'static str {
         "tcp_load_balancer"
+    }
+
+    #[cfg(feature = "slow-start")]
+    fn bind_slow_start(&self, registry: &Arc<crate::SlowStartRegistry>) {
+        let mut ramps = self.ramps.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let pending = std::mem::take(&mut *ramps);
+        *ramps = pending.into_iter().map(|binding| binding.open(registry)).collect();
     }
 
     async fn on_connect(&self, ctx: &mut TcpFilterContext<'_>) -> Result<FilterAction, FilterError> {

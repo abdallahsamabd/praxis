@@ -59,6 +59,15 @@ pub trait TcpFilter: Send + Sync {
     /// Unique name identifying this filter type.
     fn name(&self) -> &'static str;
 
+    /// Attach this filter's slow-start tables when the pipeline is installed.
+    ///
+    /// Framework-internal. A TCP load balancer that configures `slow_start`
+    /// records the current endpoints as the baseline here. Builds without the
+    /// `slow-start` feature reject that key and do not grow the trait.
+    #[doc(hidden)]
+    #[cfg(feature = "slow-start")]
+    fn bind_slow_start(&self, _registry: &Arc<crate::SlowStartRegistry>) {}
+
     /// Called when a new TCP connection is accepted.
     async fn on_connect(&self, ctx: &mut TcpFilterContext<'_>) -> Result<FilterAction, FilterError> {
         let _ = ctx;

@@ -503,6 +503,7 @@ mod tests {
             id_generator: Arc::new(praxis_core::id::IdGenerator::with_seed(0)),
             kv_stores: None,
             session_stores: None,
+            slow_start_registry: None,
             subrequest_client: None,
             may_select_streaming_subrequest_response: false,
             trace_context_filter_indices: Vec::new(),

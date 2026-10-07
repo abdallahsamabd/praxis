@@ -124,12 +124,14 @@ pub fn resolve_pipelines(
     session_stores: &Arc<praxis_filter::SessionStoreRegistry>,
     subrequest_client: &SubRequestClient,
 ) -> Result<ListenerPipelines, Box<dyn std::error::Error + Send + Sync>> {
+    let slow_start_registry = Arc::new(praxis_filter::SlowStartRegistry::new());
     resolve_pipelines_with_composition(
         config,
         registry,
         health_registry,
         kv_stores,
         session_stores,
+        &slow_start_registry,
         subrequest_client,
         &PipelineComposition::default(),
     )
@@ -154,6 +156,11 @@ pub fn resolve_pipelines(
 /// `subrequest_client`'s connector to policy filters, since a policy filter
 /// fetches JWKS while it is being constructed.
 ///
+/// The caller opens the slow-start generation before this build and publishes
+/// it only once the pipelines are the ones that will serve traffic. This
+/// function does not commit that generation, so a later failure can still
+/// leave the installed ramp history unchanged.
+///
 /// # Errors
 ///
 /// Returns an error when pipeline construction fails (unknown filter chain
@@ -175,6 +182,7 @@ pub(crate) fn resolve_pipelines_with_composition(
     health_registry: &praxis_core::health::HealthRegistry,
     kv_stores: &praxis_core::kv::KvStoreRegistry,
     session_stores: &Arc<praxis_filter::SessionStoreRegistry>,
+    slow_start_registry: &Arc<praxis_filter::SlowStartRegistry>,
     subrequest_client: &SubRequestClient,
     composition: &PipelineComposition,
 ) -> Result<ListenerPipelines, Box<dyn std::error::Error + Send + Sync>> {
@@ -202,6 +210,7 @@ pub(crate) fn resolve_pipelines_with_composition(
             health_registry,
             kv_stores,
             session_stores,
+            slow_start_registry,
             subrequest_client,
         )?;
 
@@ -267,6 +276,7 @@ fn configure_pipeline(
     health_registry: &praxis_core::health::HealthRegistry,
     kv_stores: &praxis_core::kv::KvStoreRegistry,
     session_stores: &Arc<praxis_filter::SessionStoreRegistry>,
+    slow_start_registry: &Arc<praxis_filter::SlowStartRegistry>,
     subrequest_client: &SubRequestClient,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     pipeline.apply_body_limits(
@@ -296,6 +306,7 @@ fn configure_pipeline(
     // sessions filter adopts per-cluster stores into it on demand, which is
     // what lets session bindings survive config reloads.
     pipeline.set_session_stores(Arc::clone(session_stores));
+    pipeline.set_slow_start_registry(Arc::clone(slow_start_registry));
     pipeline.set_subrequest_client(subrequest_client.clone());
 
     // Runtime SSRF / DNS-rebinding control for the HTTP upstream path: the
@@ -633,6 +644,7 @@ filter_chains:
             &empty_health_registry(),
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             &composition,
         )
@@ -1198,6 +1210,7 @@ filter_chains:
             &empty_health_registry(),
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             &composition,
         )
@@ -1235,6 +1248,7 @@ filter_chains:
             &empty_health_registry(),
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             &composition,
         );
@@ -1262,6 +1276,7 @@ filter_chains:
             &empty_health_registry(),
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             &composition,
         );
@@ -1296,6 +1311,7 @@ filter_chains:
             &empty_health_registry(),
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             &composition,
         )
@@ -1342,6 +1358,7 @@ filter_chains:
             &empty_health_registry(),
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             &composition,
         )
@@ -1401,6 +1418,11 @@ filter_chains:
     /// Empty session store registry for tests.
     fn empty_session_stores() -> Arc<praxis_filter::SessionStoreRegistry> {
         Arc::new(praxis_filter::SessionStoreRegistry::new())
+    }
+
+    /// Fresh slow-start registry for tests that do not exercise ramping.
+    fn empty_slow_start_registry() -> Arc<praxis_filter::SlowStartRegistry> {
+        Arc::new(praxis_filter::SlowStartRegistry::new())
     }
 
     /// Empty sub-request client for tests.

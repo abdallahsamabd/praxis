@@ -134,6 +134,9 @@ pub struct FilterPipeline {
     /// Per-cluster session stores for sticky session affinity, preserved across reloads.
     session_stores: Option<Arc<crate::SessionStoreRegistry>>,
 
+    /// Slow-start ramp state, preserved across reloads.
+    slow_start_registry: Option<Arc<crate::SlowStartRegistry>>,
+
     /// Shared sub-request client for iterative sub-requests.
     subrequest_client: Option<praxis_core::subrequest::SubRequestClient>,
 
@@ -590,6 +593,22 @@ impl FilterPipeline {
         self.session_stores = Some(stores);
     }
 
+    /// The shared slow-start registry, if set.
+    pub fn slow_start_registry(&self) -> Option<&Arc<crate::SlowStartRegistry>> {
+        self.slow_start_registry.as_ref()
+    }
+
+    /// Set the shared [`crate::SlowStartRegistry`] for this pipeline.
+    ///
+    /// Load balancers that configure slow start attach their tables here, so
+    /// the baseline is recorded when the pipeline is installed.
+    pub fn set_slow_start_registry(&mut self, registry: Arc<crate::SlowStartRegistry>) {
+        self.visit_nested_pipelines(&mut |pipeline| pipeline.set_slow_start_registry(Arc::clone(&registry)));
+        #[cfg(feature = "slow-start")]
+        bind_pipeline_slow_start(&self.filters, &registry);
+        self.slow_start_registry = Some(registry);
+    }
+
     /// The shared sub-request client, if set.
     pub fn subrequest_client(&self) -> Option<&praxis_core::subrequest::SubRequestClient> {
         self.subrequest_client.as_ref()
@@ -769,6 +788,14 @@ impl FilterPipeline {
     pub(crate) fn cluster_metadata_declarations(&self) -> Vec<catalog::ClusterMetadataDeclaration> {
         collect_cluster_declarations(&self.filters)
     }
+}
+
+/// Attach slow-start tables on every filter, including filters inside branches.
+#[cfg(feature = "slow-start")]
+fn bind_pipeline_slow_start(filters: &[PipelineFilter], registry: &Arc<crate::SlowStartRegistry>) {
+    for_each_pipeline_filter(filters, &mut |filter| {
+        filter.filter.bind_slow_start(registry);
+    });
 }
 
 /// Visit every filter in `filters` and, recursively, every filter nested inside

@@ -30,6 +30,10 @@ fn every_example_resolves_its_pipelines() {
         if path.file_name().is_some_and(|name| name == "access-log-syslog.yaml") {
             continue;
         }
+        #[cfg(not(feature = "slow-start"))]
+        if path.file_name().is_some_and(|name| name == "slow-start.yaml") {
+            continue;
+        }
         match resolve(&path) {
             Ok(()) => validated += 1,
             Err(error) if environmental(&error) => {},

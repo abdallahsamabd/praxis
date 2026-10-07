@@ -53,6 +53,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `max_attempts`, `per_try_timeout_ms`, `budget_percent`), validated at load.
   Nothing sends hedged requests yet; requests still take the single-upstream
   path. ([#1361](https://github.com/praxis-proxy/praxis/pull/1361))
+- Clusters accept an optional `slow_start` (`window_ms`, `aggression`) when
+  built with the `slow-start` feature. Selection does not apply the ramp yet.
+  ([#1364](https://github.com/praxis-proxy/praxis/pull/1364))
 
 ### Changed
 

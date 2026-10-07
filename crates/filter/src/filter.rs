@@ -5,7 +5,7 @@
 //!
 //! Every HTTP filter implements this trait.
 
-#[cfg(feature = "upstream-binding")]
+#[cfg(any(feature = "upstream-binding", feature = "slow-start"))]
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -69,6 +69,17 @@ pub type FilterContext<'a> = HttpFilterContext<'a>;
 pub trait HttpFilter: Send + Sync {
     /// Unique name identifying this filter type (e.g. `"router"`, `"rate_limit"`).
     fn name(&self) -> &'static str;
+
+    /// Attach this filter's slow-start tables when the pipeline is installed.
+    ///
+    /// Framework-internal. A load balancer that configures `slow_start`
+    /// records the current endpoints as the baseline here, before the first
+    /// request, and holds that table for the pipeline's lifetime. Builds
+    /// without the `slow-start` feature reject that key and do not grow the
+    /// trait.
+    #[doc(hidden)]
+    #[cfg(feature = "slow-start")]
+    fn bind_slow_start(&self, _registry: &Arc<crate::SlowStartRegistry>) {}
 
     /// Called for each incoming request, in pipeline order.
     async fn on_request(&self, ctx: &mut HttpFilterContext<'_>) -> Result<FilterAction, FilterError>;

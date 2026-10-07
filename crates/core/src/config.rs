@@ -46,8 +46,8 @@ pub use cluster::{
     DEFAULT_MAX_RETRIES, DEFAULT_RETRY_BODY_LIMIT_BYTES, Endpoint, HashFunction, HealthCheckConfig, HealthCheckType,
     HttpStatusCode, LoadBalancerStrategy, MAX_EFFECTIVE_RETRIES, MAX_RETRY_BODY_LIMIT_BYTES, MaglevOpts,
     ParameterisedStrategy, PriorityOpts, RetriableCondition, RetryBodyLimit, RetryBudgetConfig, RetryPolicy,
-    RingHashOpts, SimpleStrategy, SubsetFallbackPolicy, SubsetOpts, UpstreamAuthority, UpstreamHttpVersion,
-    ZoneAwareOpts,
+    RingHashOpts, SimpleStrategy, SlowStartConfig, SubsetFallbackPolicy, SubsetOpts, UpstreamAuthority,
+    UpstreamHttpVersion, ZoneAwareOpts,
 };
 pub use condition::{
     ApplicationMatch, Condition, ConditionMatch, ResponseCondition, ResponseConditionMatch, SelectedUpstreamMatch,
@@ -657,6 +657,10 @@ filter_chains:
                 .file_name()
                 .is_some_and(|n| n == "bound-upstream-condition.yaml" || n == "bound-upstream-dispatch.yaml")
             {
+                continue;
+            }
+            #[cfg(not(feature = "slow-start"))]
+            if entry.file_name().is_some_and(|n| n == "slow-start.yaml") {
                 continue;
             }
             Config::from_file(&entry).unwrap_or_else(|err| panic!("{}: {err}", entry.display()));

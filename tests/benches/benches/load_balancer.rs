@@ -99,20 +99,9 @@ fn make_ctx_with_cluster<'a>(req: &'a praxis_filter::Request, cluster: &str) -> 
 /// Build a cluster with the given strategy and `n` endpoints.
 fn make_cluster(strategy: LoadBalancerStrategy, n: usize) -> Cluster {
     let endpoints: Vec<String> = (0..n).map(|i| format!("10.0.{}.{}:8080", i / 256, i % 256)).collect();
+    let endpoints = endpoints.into_iter().map(Into::into).collect();
     Cluster {
-        http: praxis_core::config::ClusterHttpOptions::default(),
-        connection_timeout_ms: None,
-        endpoints: endpoints.into_iter().map(Into::into).collect(),
-        health_check: None,
-        idle_timeout_ms: None,
         load_balancer_strategy: strategy,
-        max_connections: None,
-        name: "bench".into(),
-        read_timeout_ms: None,
-        retry_policy: None,
-        tls: None,
-        total_connection_timeout_ms: None,
-        trusted_private_endpoints: Vec::new(),
-        write_timeout_ms: None,
+        ..Cluster::with_defaults("bench", endpoints)
     }
 }

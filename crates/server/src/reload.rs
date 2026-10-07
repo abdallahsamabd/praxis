@@ -67,6 +67,7 @@ pub(crate) fn reload_pipelines(
     health_shutdown: &Arc<Mutex<CancellationToken>>,
     kv_stores: &praxis_core::kv::KvStoreRegistry,
     session_stores: &Arc<praxis_filter::SessionStoreRegistry>,
+    slow_start_registry: &Arc<praxis_filter::SlowStartRegistry>,
     subrequest_client: &praxis_core::subrequest::SubRequestClient,
     log_level: Option<&Arc<praxis_core::logging::LogLevelState>>,
     composition: &PipelineComposition,
@@ -96,12 +97,16 @@ pub(crate) fn reload_pipelines(
         new_ceiling,
     );
 
+    // Hold the generation across the last fallible step. Publishing it inside
+    // pipeline construction would retire live tables when a later step fails.
+    let slow_start_generation = slow_start_registry.enter_generation();
     let new_pipelines = match resolve_pipelines_with_composition(
         new_config,
         registry,
         &health_registry,
         kv_stores,
         session_stores,
+        slow_start_registry,
         &updated_client,
         composition,
     ) {
@@ -143,6 +148,8 @@ pub(crate) fn reload_pipelines(
         error!(%error, "config reload failed: log level baseline refresh");
         return Err(error.into());
     }
+
+    slow_start_generation.commit();
 
     // Copy known-down endpoint state into the new registry BEFORE the
     // swap: afterwards `live` already serves the new pipelines and the
@@ -498,6 +505,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -552,6 +560,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -600,6 +609,7 @@ filter_chains:
                 &shutdown,
                 &empty_kv_stores(),
                 &empty_session_stores(),
+                &empty_slow_start_registry(),
                 &empty_subrequest_client(),
                 None,
                 &PipelineComposition::default(),
@@ -629,6 +639,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -810,6 +821,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -831,6 +843,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -916,6 +929,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -996,6 +1010,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -1172,6 +1187,7 @@ filter_chains:
             &shutdown,
             &kv_stores,
             &session_stores,
+            &empty_slow_start_registry(),
             &subrequest_client,
             None,
             &PipelineComposition::default(),
@@ -1223,6 +1239,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -1249,6 +1266,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -1277,6 +1295,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -1320,6 +1339,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -1362,6 +1382,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -1955,6 +1976,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -2010,6 +2032,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -2028,6 +2051,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -2080,6 +2104,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -2160,6 +2185,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -2192,6 +2218,7 @@ filter_chains:
             &shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &composition,
@@ -2336,6 +2363,7 @@ filter_chains:
             shutdown,
             &empty_kv_stores(),
             &empty_session_stores(),
+            &empty_slow_start_registry(),
             &empty_subrequest_client(),
             None,
             &PipelineComposition::default(),
@@ -2461,6 +2489,11 @@ filter_chains:
     /// Empty session store registry for tests.
     fn empty_session_stores() -> Arc<praxis_filter::SessionStoreRegistry> {
         Arc::new(praxis_filter::SessionStoreRegistry::new())
+    }
+
+    /// Fresh slow-start registry for reload tests.
+    fn empty_slow_start_registry() -> Arc<praxis_filter::SlowStartRegistry> {
+        Arc::new(praxis_filter::SlowStartRegistry::new())
     }
 
     /// Empty sub-request client for tests.
