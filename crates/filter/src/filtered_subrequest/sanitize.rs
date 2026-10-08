@@ -290,6 +290,7 @@ pub(crate) fn subresponse_from_rejection(rejection: Rejection) -> SubResponse {
     }
     let mut response = SubResponse {
         status,
+        version: http::Version::HTTP_11,
         headers,
         body: rejection.body.unwrap_or_default(),
     };

@@ -51,8 +51,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ([#1349](https://github.com/praxis-proxy/praxis/pull/1349))
 - `router` routes accept an optional `hedge_policy` (`initial_requests`,
   `max_attempts`, `per_try_timeout_ms`, `budget_percent`), validated at load.
-  Nothing sends hedged requests yet; requests still take the single-upstream
-  path. ([#1361](https://github.com/praxis-proxy/praxis/pull/1361))
+  With the `hedged-requests` feature, an eligible idempotent request is raced
+  across healthy endpoints and the first 2xx, 3xx, or 4xx response is
+  returned. The feature is off by default. When it is off, the policy is
+  still parsed and every request stays on one upstream.
+  ([#1361](https://github.com/praxis-proxy/praxis/pull/1361),
+  [#1372](https://github.com/praxis-proxy/praxis/pull/1372))
 - Clusters accept an optional `slow_start` (`window_ms`, `aggression`) when
   built with the `slow-start` feature. Selection does not apply the ramp yet.
   ([#1364](https://github.com/praxis-proxy/praxis/pull/1364))
@@ -72,6 +76,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   new public `headers_present` field, so struct literals need
   `headers_present: None`.
   ([#1348](https://github.com/praxis-proxy/praxis/pull/1348))
+- **Breaking:** Rust API: `SubResponse` has a new public `version` field, so
+  struct literals need `version`.
+  ([#1372](https://github.com/praxis-proxy/praxis/pull/1372))
 
 ### Removed
 
@@ -117,6 +124,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Security
 
+- `rustls` is 0.23.46, which fixes buffered application data sent after ECH
+  rejection, Brotli certificate decompression allocating before
+  authentication, an unauthenticated ServerHello downgrading later
+  connections, and `Debug` impls exposing TLS secrets
+  (`RUSTSEC-2026-0347`, `RUSTSEC-2026-0348`, `RUSTSEC-2026-0349`,
+  `RUSTSEC-2026-0346`).
 - `--dump` and the admin `/api/pipelines` view now redact credential-looking
   header matcher values (`authorization`, `x-session-id` and the like) in
   filter and chain conditions, and `--dump` redacts `credential_injection`

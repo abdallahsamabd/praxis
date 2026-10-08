@@ -1072,7 +1072,7 @@ impl FilteredSubrequestExecutor {
                             Ok(RawResponse::Streaming {
                                 body: Box::new(response.body),
                                 outcome: SubrequestOutcome {
-                                    response: SubResponse { status: status.as_u16(), headers, body: Bytes::new() },
+                                    response: SubResponse { version: http::Version::HTTP_11, status: status.as_u16(), headers, body: Bytes::new() },
                                     origin: ResponseOrigin::Upstream,
                                     transport_error: None,
                                 },
@@ -1081,7 +1081,7 @@ impl FilteredSubrequestExecutor {
                         Err(error) => {
                             let (status, kind) = classify_transport_failure(&error);
                             warn!(step = label, %error, status, "filtered sub-request streaming transport failure");
-                            let response = SubResponse { status, headers: HeaderMap::new(), body: Bytes::new() };
+                            let response = SubResponse { version: http::Version::HTTP_11, status, headers: HeaderMap::new(), body: Bytes::new() };
                             response_header.status = http::StatusCode::from_u16(status)
                                 .map_err(|source| -> FilterError { source.into() })?;
                             filter_ctx.response_header = Some(&mut response_header);
@@ -1101,6 +1101,7 @@ impl FilteredSubrequestExecutor {
                             sanitize_subresponse_headers(&mut headers);
                             Ok(RawResponse::Complete(SubrequestOutcome {
                                 response: SubResponse {
+                                    version: http::Version::HTTP_11,
                                     status: metadata.status.as_u16(),
                                     headers,
                                     body: response.body,
@@ -1135,7 +1136,7 @@ impl FilteredSubrequestExecutor {
                                     let (status, kind) = classify_transport_failure(&error);
                                     warn!(step = label, %error, status, "filtered sub-request buffered transport failure");
                                     let response =
-                                        SubResponse { status, headers: HeaderMap::new(), body: Bytes::new() };
+                                        SubResponse { version: http::Version::HTTP_11, status, headers: HeaderMap::new(), body: Bytes::new() };
                                     if matches!(error, SubRequestError::Connect(_)) {
                                         // Connection refused/unreachable: remember
                                         // it and try the next validated address.
@@ -1151,7 +1152,7 @@ impl FilteredSubrequestExecutor {
                                 // no TLS name): remember it and try the next
                                 // validated address.
                                 attempt = Some((
-                                    SubResponse { status: 502, headers: HeaderMap::new(), body: Bytes::new() },
+                                    SubResponse { version: http::Version::HTTP_11, status: 502, headers: HeaderMap::new(), body: Bytes::new() },
                                     ResponseOrigin::Transport,
                                     Some(TransportFailure::Connect),
                                 ));
@@ -1163,7 +1164,7 @@ impl FilteredSubrequestExecutor {
                     }
                     let (mut response, origin, transport_error) = attempt.unwrap_or_else(|| {
                         (
-                            SubResponse { status: 502, headers: HeaderMap::new(), body: Bytes::new() },
+                            SubResponse { version: http::Version::HTTP_11, status: 502, headers: HeaderMap::new(), body: Bytes::new() },
                             ResponseOrigin::Transport,
                             Some(TransportFailure::Connect),
                         )
@@ -1229,6 +1230,7 @@ impl FilteredSubrequestExecutor {
             Ok(Err(error)) => return Err(FilteredSubrequestError::capture(error, &mut filter_ctx)),
             Err(_) if in_transport.load(Ordering::Acquire) => RawResponse::Complete(SubrequestOutcome {
                 response: SubResponse {
+                    version: http::Version::HTTP_11,
                     status: 504,
                     headers: HeaderMap::new(),
                     body: Bytes::new(),

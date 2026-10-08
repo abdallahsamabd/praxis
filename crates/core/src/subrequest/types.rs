@@ -46,6 +46,9 @@ pub struct SubResponse {
     /// HTTP status code.
     pub status: u16,
 
+    /// Protocol version of the upstream response.
+    pub version: http::Version,
+
     /// Response headers.
     pub headers: HeaderMap,
 

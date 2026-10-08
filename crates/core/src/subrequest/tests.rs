@@ -167,6 +167,7 @@ fn subrequest_clone_preserves_fields() {
 #[test]
 fn subresponse_clone_preserves_fields() {
     let resp = SubResponse {
+        version: http::Version::HTTP_11,
         status: 200,
         headers: HeaderMap::new(),
         body: Bytes::from_static(b"world"),
@@ -740,6 +741,7 @@ fn circuit_guard_success_records_success() {
     let key = test_peer("127.0.0.1:8080");
     let guard = acquire_guard(&registry, key.clone());
     let result: Result<SubResponse, SubRequestError> = Ok(SubResponse {
+        version: http::Version::HTTP_11,
         status: 200,
         headers: HeaderMap::new(),
         body: Bytes::new(),
@@ -811,6 +813,29 @@ fn circuit_guard_drop_without_finalize_records_failure() {
     assert!(
         !registry.precheck(&key),
         "dropped guard should record failure (deadline/panic path)"
+    );
+}
+
+#[test]
+fn circuit_guard_neutral_drop_leaves_the_peer_healthy() {
+    let registry = test_registry(1);
+    let key = test_peer("127.0.0.1:8080");
+    let mut guard = acquire_guard(&registry, key.clone());
+    guard.abandon_as_neutral();
+    drop(guard);
+    assert!(registry.precheck(&key), "an abandoned attempt is not a peer failure");
+}
+
+#[test]
+fn circuit_guard_fail_connect_records_failure() {
+    let registry = test_registry(1);
+    let key = test_peer("127.0.0.1:8080");
+    let mut guard = acquire_guard(&registry, key.clone());
+    guard.abandon_as_neutral();
+    guard.fail(&SubRequestError::Connect("refused".to_owned()));
+    assert!(
+        !registry.precheck(&key),
+        "a connect error is still a failure when drop would be neutral"
     );
 }
 
@@ -2535,6 +2560,48 @@ async fn execute_enforces_deadline_during_body_read() {
     assert!(
         matches!(result, Err(SubRequestError::DeadlineExceeded | SubRequestError::Io(_))),
         "a stalled body must hit the deadline: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn execute_applies_peer_read_timeout_to_each_body_read() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let backend = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = vec![0_u8; 4096];
+        let _bytes_read = socket.read(&mut buf).await;
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n")
+            .await
+            .unwrap();
+        socket.flush().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(60)).await;
+    });
+
+    let mut peer = peer_for(addr);
+    peer.options.read_timeout = Some(Duration::from_millis(50));
+    let connector = test_connector(1, None);
+    let client = super::client::SubRequestClient::new(connector);
+    let started = tokio::time::Instant::now();
+    let result = Box::pin(client.execute(&peer, &get_request("/stall-read"), 1024, Duration::from_secs(5), None)).await;
+    let elapsed = started.elapsed();
+    backend.abort();
+
+    match result {
+        Err(SubRequestError::Io(message)) => {
+            assert!(
+                message.contains("read timeout"),
+                "peer read_timeout must classify as a read timeout: {message}"
+            );
+        },
+        other => panic!("a stalled body must stop at the peer read timeout, got {other:?}"),
+    }
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "the body read must stop at read_timeout, took {elapsed:?}"
     );
 }
 

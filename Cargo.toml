@@ -107,7 +107,7 @@ regex = "1.13.1"
 # below at startup (see crates/tls/src/provider.rs). Leaving rustls' defaults
 # on would silently link aws-lc-rs into every build, and
 # `prefer-post-quantum` is omitted because it implies `aws_lc_rs`.
-rustls = { version = "0.23.45", default-features = false, features = ["logging", "std", "tls12"] }
+rustls = { version = "0.23.46", default-features = false, features = ["logging", "std", "tls12"] }
 # The OpenSSL-backed rustls provider, vendored and published from the Pingora
 # fork (tofay/rustls-openssl 0.4.1 plus its FIPS provider-routing fixes); the
 # library name is still `rustls_openssl`.

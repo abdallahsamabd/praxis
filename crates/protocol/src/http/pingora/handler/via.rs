@@ -74,6 +74,19 @@ fn combined_via(headers: &http::HeaderMap, entry: &str) -> Option<String> {
     (!existing.is_empty()).then(|| format!("{}, {entry}", existing.join(", ")))
 }
 
+/// Append this proxy's Via entry to an `http` header map.
+#[cfg(feature = "hedged-requests")]
+pub(super) fn append_map_via(headers: &mut http::HeaderMap, version: Version) {
+    let entry = via_value(version);
+    if let Some(combined) = combined_via(headers, entry)
+        && let Ok(value) = http::HeaderValue::from_str(&combined)
+    {
+        headers.insert(http::header::VIA, value);
+        return;
+    }
+    headers.insert(http::header::VIA, via_header_value(entry));
+}
+
 /// Append a Via entry to a Pingora request header.
 ///
 /// All existing valid UTF-8 `Via` field-lines are preserved and this

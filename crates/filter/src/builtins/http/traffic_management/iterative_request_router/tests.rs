@@ -827,6 +827,7 @@ fn build_terminal_preserves_body() {
     use crate::SubResponse;
 
     let response = SubResponse {
+        version: http::Version::HTTP_11,
         status: 200,
         headers: HeaderMap::new(),
         body: bytes::Bytes::from_static(b"test body"),
@@ -851,6 +852,7 @@ fn build_terminal_preserves_headers() {
     let mut headers = HeaderMap::new();
     headers.insert("content-type", "application/json".parse().unwrap());
     let response = SubResponse {
+        version: http::Version::HTTP_11,
         status: 200,
         headers,
         body: bytes::Bytes::new(),
@@ -1254,6 +1256,7 @@ fn make_default_done() -> config::StepTransition {
 fn make_response(status: u16) -> crate::SubResponse {
     crate::SubResponse {
         status,
+        version: http::Version::HTTP_11,
         headers: HeaderMap::new(),
         body: bytes::Bytes::new(),
     }
@@ -2538,6 +2541,7 @@ fn build_terminal_multiple_headers() {
     headers.insert("content-type", "application/json".parse().unwrap());
     headers.insert("x-request-id", "abc123".parse().unwrap());
     let response = SubResponse {
+        version: http::Version::HTTP_11,
         status: 200,
         headers,
         body: bytes::Bytes::new(),
@@ -2555,6 +2559,7 @@ fn build_terminal_reframes_empty_response_for_keepalive() {
     headers.insert(http::header::TRANSFER_ENCODING, "chunked".parse().unwrap());
     headers.insert(http::header::CONTENT_TYPE, "application/json".parse().unwrap());
     let response = SubResponse {
+        version: http::Version::HTTP_11,
         status: 200,
         headers,
         body: bytes::Bytes::new(),
@@ -2583,6 +2588,7 @@ fn build_terminal_preserves_head_content_length() {
     let mut headers = HeaderMap::new();
     headers.insert(http::header::CONTENT_LENGTH, "123".parse().unwrap());
     let response = SubResponse {
+        version: http::Version::HTTP_11,
         status: 200,
         headers,
         body: bytes::Bytes::new(),
@@ -2600,6 +2606,7 @@ fn build_terminal_preserves_opaque_header_bytes() {
     let mut headers = HeaderMap::new();
     headers.insert("x-opaque", http::HeaderValue::from_bytes(&[b'a', 0x80, b'z']).unwrap());
     let response = SubResponse {
+        version: http::Version::HTTP_11,
         status: 200,
         headers,
         body: bytes::Bytes::new(),

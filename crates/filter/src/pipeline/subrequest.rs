@@ -218,6 +218,7 @@ mod tests {
                 body: Bytes::from_static(b"request"),
             },
             previous_response: Some(SubResponse {
+                version: http::Version::HTTP_11,
                 status: 200,
                 headers: HeaderMap::new(),
                 body: Bytes::from_static(b"response"),
@@ -240,6 +241,7 @@ mod tests {
         accumulator.insert("key".to_owned(), Bytes::from_static(b"value"));
 
         let prev = SubResponse {
+            version: http::Version::HTTP_11,
             status: 200,
             headers: {
                 let mut h = HeaderMap::new();
