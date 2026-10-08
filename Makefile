@@ -789,6 +789,15 @@ audit: ## cargo audit + cargo deny
 # PUBLISH_DRY_RUN_FLAGS=--no-verify, because there the workspace version is
 # already on crates.io, so verifying a dependent crate would build it against
 # the older published siblings and fail. --locked still catches a stale lock.
+#
+# Both publish targets talk to crates.io, and over HTTP/2 curl now and then
+# fails a sparse-index fetch with "Error in the HTTP2 framing layer", which
+# cargo did not retry and which failed an otherwise green run on main. Stick
+# to HTTP/1.1 for the registry and let cargo retry the transient errors it
+# does recognize a few more times. The traffic here is a handful of index
+# files and the crate tarballs, so HTTP/1.1 costs nothing measurable.
+publish-dry-run publish: export CARGO_HTTP_MULTIPLEXING = false
+publish-dry-run publish: export CARGO_NET_RETRY = 5
 PUBLISH_DRY_RUN_FLAGS ?=
 publish-dry-run: ## package check of the release crates
 	cargo publish --workspace --dry-run --locked $(PUBLISH_DRY_RUN_FLAGS)
