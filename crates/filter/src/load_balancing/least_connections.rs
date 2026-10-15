@@ -13,7 +13,11 @@ use std::{
 
 use praxis_core::health::ClusterHealthState;
 
-use super::{endpoint::WeightedEndpoint, is_excluded};
+use super::{
+    endpoint::WeightedEndpoint,
+    is_excluded,
+    slow_start::{self, EffectiveWeights},
+};
 
 // -----------------------------------------------------------------------------
 // LeastConnections
@@ -72,12 +76,64 @@ impl LeastConnections {
     ///
     /// Falls back to all endpoints (panic mode) when all are unhealthy.
     /// Ties are broken by preferring higher-weight endpoints.
-    #[expect(clippy::indexing_slicing, reason = "positions come from the endpoints scan")]
     pub(crate) fn select(&self, health: Option<&ClusterHealthState>, exclude: &[Arc<str>]) -> Option<Arc<str>> {
+        self.select_weighted(health, exclude, None)
+    }
+
+    /// Pick the least-loaded endpoint, comparing load to ramp weight when `weights` scales.
+    ///
+    /// A smaller effective weight fills up sooner: `load / weight` is the score,
+    /// so a new endpoint takes traffic in proportion to how far it has ramped.
+    pub(crate) fn select_weighted(
+        &self,
+        health: Option<&ClusterHealthState>,
+        exclude: &[Arc<str>],
+        weights: Option<&EffectiveWeights>,
+    ) -> Option<Arc<str>> {
+        if slow_start::scaling_weights(weights).is_some() {
+            return self.select_scaled(health, exclude, weights);
+        }
+        self.select_configured(health, exclude)
+    }
+
+    /// Pick using configured weights as the tie-break.
+    #[expect(clippy::indexing_slicing, reason = "positions come from the endpoints scan")]
+    fn select_configured(&self, health: Option<&ClusterHealthState>, exclude: &[Arc<str>]) -> Option<Arc<str>> {
         loop {
             let (pos, load) = self.find_best(health, exclude)?;
             let counter = &self.counters[pos];
 
+            if counter
+                .compare_exchange_weak(load, load + 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return Some(Arc::clone(&self.endpoints[pos].address));
+            }
+        }
+    }
+
+    /// Pick using `load / effective_weight`. Endpoints still at zero are skipped.
+    #[expect(clippy::indexing_slicing, reason = "positions come from the endpoints scan")]
+    fn select_scaled(
+        &self,
+        health: Option<&ClusterHealthState>,
+        exclude: &[Arc<str>],
+        weights: Option<&EffectiveWeights>,
+    ) -> Option<Arc<str>> {
+        loop {
+            let Some((pos, load)) = self.find_scaled(health, exclude, weights) else {
+                let any_healthy = health.is_some_and(|state| {
+                    state
+                        .endpoints()
+                        .iter()
+                        .any(praxis_core::health::EndpointHealth::is_healthy)
+                });
+                if any_healthy {
+                    return None;
+                }
+                return self.select_configured(health, exclude);
+            };
+            let counter = &self.counters[pos];
             if counter
                 .compare_exchange_weak(load, load + 1, Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
@@ -119,6 +175,58 @@ impl LeastConnections {
         }
 
         self.select_from_candidates(|ep| !is_excluded(&ep.address, exclude), offset)
+    }
+
+    /// Best endpoint by `load / ramp weight`, then higher weight, then rotation.
+    #[expect(clippy::indexing_slicing, reason = "counters is positionally aligned with endpoints")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scan owns the ratio comparison and rotation rank"
+    )]
+    fn find_scaled(
+        &self,
+        health: Option<&ClusterHealthState>,
+        exclude: &[Arc<str>],
+        weights: Option<&EffectiveWeights>,
+    ) -> Option<(usize, usize)> {
+        let offset = self.rr_counter.fetch_add(1, Ordering::Relaxed);
+        let keep = |endpoint: &WeightedEndpoint| {
+            slow_start::endpoint_weight(&endpoint.address, endpoint.weight, weights) > 0
+                && !is_excluded(&endpoint.address, exclude)
+                && health.is_none_or(|state| state.is_address_healthy(&endpoint.address))
+        };
+        let len = self.endpoints.iter().filter(|endpoint| keep(endpoint)).count();
+        if len == 0 {
+            return None;
+        }
+        let start = offset % len;
+        let mut best: Option<(u128, u128, usize, usize, usize)> = None;
+        let mut filtered_index = 0_usize;
+        for (pos, endpoint) in self.endpoints.iter().enumerate() {
+            if !keep(endpoint) {
+                continue;
+            }
+            let rank = (filtered_index + len - start) % len;
+            filtered_index += 1;
+            let weight = slow_start::endpoint_weight(&endpoint.address, endpoint.weight, weights);
+            let load = self.counters[pos].load(Ordering::Acquire);
+            let ratio_load = u128::try_from(load).unwrap_or(u128::MAX);
+            let ratio_weight = u128::from(weight);
+            let better = match best {
+                None => true,
+                Some((best_load, best_weight, best_rank, ..)) => {
+                    let left = ratio_load.saturating_mul(best_weight);
+                    let right = best_load.saturating_mul(ratio_weight);
+                    left < right
+                        || (left == right && ratio_weight > best_weight)
+                        || (left == right && ratio_weight == best_weight && rank < best_rank)
+                },
+            };
+            if better {
+                best = Some((ratio_load, ratio_weight, rank, load, pos));
+            }
+        }
+        best.map(|(_, _, _, load, pos)| (pos, load))
     }
 
     /// Select the best candidate among endpoints matching `keep`, using the
@@ -185,6 +293,22 @@ mod tests {
     use praxis_core::health::{ClusterHealthEntry, EndpointHealth};
 
     use super::*;
+
+    #[test]
+    fn scaled_weight_shares_equal_load_with_the_ramp() {
+        let lc = LeastConnections::new(vec![
+            WeightedEndpoint::simple(Arc::from("10.0.0.1:80"), 1),
+            WeightedEndpoint::simple(Arc::from("10.0.0.2:80"), 1),
+        ]);
+        let weights = EffectiveWeights::from_scaled(&[("10.0.0.1:80", 1_000_000), ("10.0.0.2:80", 500_000)]);
+        let first = lc.select_weighted(None, &[], Some(&weights)).unwrap();
+        assert_eq!(&*first, "10.0.0.1:80", "equal load prefers the higher ramp weight");
+        let second = lc.select_weighted(None, &[], Some(&weights)).unwrap();
+        assert_eq!(
+            &*second, "10.0.0.2:80",
+            "the lighter endpoint is chosen once the heavier one has a request in flight"
+        );
+    }
 
     #[test]
     fn selects_min() {

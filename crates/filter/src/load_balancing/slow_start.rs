@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Praxis Contributors
 
-#![expect(
-    dead_code,
-    reason = "load-balancer strategies consume this ramp in the follow-up change"
-)]
-
 //! Slow-start ramp shared by the weighted load-balancing strategies.
 //!
 //! The registry survives config reload, so an endpoint added in a later
 //! generation is ramped and an endpoint that was already present keeps the
 //! clock it started with. Health transitions are applied on each selection.
+
+#![cfg_attr(
+    not(feature = "slow-start"),
+    expect(
+        dead_code,
+        reason = "bindings and the ramp engine are installed only with the slow-start feature"
+    )
+)]
 
 use std::{
     collections::{HashMap, HashSet},
@@ -68,9 +71,9 @@ impl SlowStartParams {
 /// Values are in [`WEIGHT_SCALE`] units so a fractional ramp is still a
 /// positive integer. Round robin must not use those units as contiguous
 /// buckets (`slot = tick % total`): two settled endpoints at weight 1 would
-/// each take a million requests in a row. The follow-up that teaches round
-/// robin to read this map needs smooth weighted round robin, which
-/// interleaves endpoints, instead of the scaled total as the bucket size.
+/// each take a million requests in a row. While the ramp is scaling, round
+/// robin uses smooth weighted round robin, which interleaves endpoints
+/// instead of treating the scaled total as the bucket size.
 #[derive(Clone)]
 pub(crate) struct EffectiveWeights {
     /// Scaled weight keyed by endpoint address.
@@ -103,6 +106,39 @@ impl EffectiveWeights {
     pub(crate) fn scales_capacity(&self) -> bool {
         !self.fallback
     }
+
+    /// Scaled weights for a test pick that does not go through the registry.
+    #[cfg(test)]
+    pub(crate) fn from_scaled(entries: &[(&str, u64)]) -> Self {
+        let by_address = entries
+            .iter()
+            .map(|(address, weight)| (Arc::<str>::from(*address), *weight))
+            .collect();
+        Self {
+            by_address: Arc::new(by_address),
+            fallback: false,
+        }
+    }
+}
+
+/// Ramp weights that should change a pick, or `None` to keep configured weights.
+///
+/// A fallback pick, where every healthy endpoint is still at zero, is `None`
+/// so the cluster keeps serving with the configured weights.
+pub(crate) fn scaling_weights(weights: Option<&EffectiveWeights>) -> Option<&EffectiveWeights> {
+    weights.filter(|weights| weights.scales_capacity())
+}
+
+/// Snapshot for `cluster` when one of `bindings` ramps it.
+pub(crate) fn weights_for(
+    bindings: &[SlowStartBinding],
+    cluster: &str,
+    health: Option<&ClusterHealthState>,
+) -> Option<EffectiveWeights> {
+    bindings
+        .iter()
+        .find(|binding| binding.cluster_name() == cluster)
+        .map(|binding| binding.snapshot(None, health))
 }
 
 /// Weight units for one endpoint, using the ramp when one is active.
@@ -545,6 +581,11 @@ impl SlowStartBinding {
             key: OnceLock::new(),
             ramp: OnceLock::new(),
         }
+    }
+
+    /// Cluster this binding ramps.
+    pub(crate) fn cluster_name(&self) -> &str {
+        &self.cluster
     }
 
     /// Attach to `registry` now, so the baseline is recorded before the first request.
@@ -1152,6 +1193,40 @@ mod tests {
             0,
             "the endpoint added by the successful build ramps"
         );
+    }
+
+    #[test]
+    fn round_robin_uses_the_ramp_for_a_newly_added_endpoint() {
+        use crate::load_balancing::{endpoint::WeightedEndpoint, round_robin::RoundRobin};
+
+        let registry = Arc::new(SlowStartRegistry::new());
+        registry.pin(Instant::now());
+        let started = registry.enter_generation();
+        let baseline = binding(&["10.0.0.1:80"]).open(&registry);
+        started.commit();
+        let next = registry.enter_generation();
+        let added = binding(&["10.0.0.1:80", "10.0.0.2:80"]).open(&registry);
+        next.commit();
+        let weights = added.snapshot(Some(&registry), None);
+        let rr = RoundRobin::new(vec![
+            WeightedEndpoint::simple(Arc::from("10.0.0.1:80"), 1),
+            WeightedEndpoint::simple(Arc::from("10.0.0.2:80"), 1),
+        ]);
+        for _ in 0..4 {
+            let picked = rr
+                .select_weighted(None, &[], Some(&weights))
+                .expect("the baseline endpoint is at full weight");
+            assert_eq!(&*picked, "10.0.0.1:80", "a just-added endpoint stays out of rotation");
+        }
+        registry.advance(Duration::from_millis(30_000));
+        let settled = added.snapshot(Some(&registry), None);
+        let mut seen_new = false;
+        for _ in 0..4 {
+            let picked = rr.select_weighted(None, &[], Some(&settled)).expect("both endpoints");
+            seen_new |= &*picked == "10.0.0.2:80";
+        }
+        assert!(seen_new, "the new endpoint joins rotation once its window ends");
+        drop(baseline);
     }
 
     #[test]

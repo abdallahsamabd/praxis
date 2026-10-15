@@ -140,6 +140,40 @@ impl TcpLoadBalancerFilter {
     fn cluster_health<'a>(registry: Option<&'a HealthRegistry>, cluster_name: &str) -> Option<&'a ClusterHealthState> {
         registry.and_then(|r| r.get(cluster_name))
     }
+
+    /// Ramp snapshot for `cluster`, when this filter is holding its binding.
+    fn slow_start_weights(
+        &self,
+        cluster: &str,
+        health: Option<&ClusterHealthState>,
+    ) -> Option<crate::load_balancing::slow_start::EffectiveWeights> {
+        #[cfg(feature = "slow-start")]
+        {
+            let ramps = self.ramps.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let weights = crate::load_balancing::slow_start::weights_for(&ramps, cluster, health);
+            drop(ramps);
+            weights
+        }
+        #[cfg(not(feature = "slow-start"))]
+        {
+            let _ = (self, cluster, health);
+            None
+        }
+    }
+
+    /// Configured selection, unless the ramp is scaling this request's snapshot.
+    fn select_address(
+        strategy: &Strategy,
+        client_ip: &str,
+        health: Option<&ClusterHealthState>,
+        weights: Option<&crate::load_balancing::slow_start::EffectiveWeights>,
+    ) -> Option<Arc<str>> {
+        if crate::load_balancing::slow_start::scaling_weights(weights).is_some() {
+            strategy.select_weighted(Some(client_ip), health, &[], weights)
+        } else {
+            strategy.select(Some(client_ip), health, &[])
+        }
+    }
 }
 
 /// Bindings for clusters that configure a strategy which consumes the ramp.
@@ -187,9 +221,9 @@ impl TcpFilter for TcpLoadBalancerFilter {
         }
 
         let client_ip = ctx.remote_addr.rsplit_once(':').map_or(ctx.remote_addr, |(ip, _)| ip);
-        let addr = strategy
-            .select(Some(client_ip), health, &[])
-            .ok_or_else(|| -> FilterError {
+        let weights = self.slow_start_weights(cluster_name, health);
+        let addr =
+            Self::select_address(strategy, client_ip, health, weights.as_ref()).ok_or_else(|| -> FilterError {
                 format!("tcp_load_balancer: cluster '{cluster_name}' has no available endpoints").into()
             })?;
         debug!(cluster = %cluster_name, upstream = %addr, "TCP upstream selected");
