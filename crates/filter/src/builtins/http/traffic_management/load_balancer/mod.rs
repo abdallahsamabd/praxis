@@ -96,9 +96,12 @@ pub struct LoadBalancerFilter {
     /// Slow-start bindings held for the lifetime of this pipeline.
     ///
     /// Filled at construction and attached when the pipeline is installed.
-    /// Selection reads the snapshot for the cluster it is picking.
+    /// Selection reads the snapshot for the cluster it is picking. The
+    /// bindings do not sit behind a mutex: attaching only fills locks inside
+    /// each binding, so a cluster without `slow_start` does not queue behind
+    /// one that is ramping.
     #[cfg(feature = "slow-start")]
-    ramps: std::sync::Mutex<Vec<crate::load_balancing::slow_start::SlowStartBinding>>,
+    ramps: Vec<crate::load_balancing::slow_start::SlowStartBinding>,
 }
 
 /// Where a load balancer reads the target cluster name for a request.
@@ -182,7 +185,7 @@ impl LoadBalancerFilter {
             clusters: map,
             cluster_source,
             #[cfg(feature = "slow-start")]
-            ramps: std::sync::Mutex::new(slow_start_bindings(clusters)),
+            ramps: slow_start_bindings(clusters),
         })
     }
 
@@ -291,10 +294,7 @@ impl LoadBalancerFilter {
     ) -> Option<crate::load_balancing::slow_start::EffectiveWeights> {
         #[cfg(feature = "slow-start")]
         {
-            let ramps = self.ramps.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let weights = crate::load_balancing::slow_start::weights_for(&ramps, cluster, health);
-            drop(ramps);
-            weights
+            crate::load_balancing::slow_start::weights_for(&self.ramps, cluster, health)
         }
         #[cfg(not(feature = "slow-start"))]
         {
@@ -325,9 +325,9 @@ impl HttpFilter for LoadBalancerFilter {
 
     #[cfg(feature = "slow-start")]
     fn bind_slow_start(&self, registry: &Arc<crate::SlowStartRegistry>) {
-        let mut ramps = self.ramps.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let pending = std::mem::take(&mut *ramps);
-        *ramps = pending.into_iter().map(|binding| binding.open(registry)).collect();
+        for binding in &self.ramps {
+            binding.open(registry);
+        }
     }
 
     fn load_balancer_clusters(&self) -> Vec<String> {

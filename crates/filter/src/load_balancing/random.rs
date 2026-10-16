@@ -242,6 +242,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn scaled_random_skips_a_zero_ramp() {
+        let random = Random::new(vec![ep("10.0.0.1:80", 1), ep("10.0.0.2:80", 1)]);
+        let weights = EffectiveWeights::from_scaled(&[("10.0.0.1:80", 1_000_000), ("10.0.0.2:80", 0)]);
+        for _ in 0..16 {
+            let picked = random
+                .select_weighted(None, &[], Some(&weights))
+                .expect("the settled endpoint");
+            assert_eq!(&*picked, "10.0.0.1:80", "an endpoint at zero stays out of the draw");
+        }
+    }
+
+    #[test]
     fn single_endpoint_always_selected() {
         let r = Random::new(vec![ep("10.0.0.1:80", 1)]);
         for _ in 0..10 {

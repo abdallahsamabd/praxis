@@ -177,7 +177,7 @@ impl LeastConnections {
         self.select_from_candidates(|ep| !is_excluded(&ep.address, exclude), offset)
     }
 
-    /// Best endpoint by `load / ramp weight`, then higher weight, then rotation.
+    /// Best endpoint by `(load + 1) * configured / scaled`, then higher weight, then rotation.
     #[expect(clippy::indexing_slicing, reason = "counters is positionally aligned with endpoints")]
     #[expect(
         clippy::too_many_lines,
@@ -200,7 +200,7 @@ impl LeastConnections {
             return None;
         }
         let start = offset % len;
-        let mut best: Option<(u128, u128, usize, usize, usize)> = None;
+        let mut best: Option<(u32, u64, usize, usize, usize)> = None;
         let mut filtered_index = 0_usize;
         for (pos, endpoint) in self.endpoints.iter().enumerate() {
             if !keep(endpoint) {
@@ -208,22 +208,20 @@ impl LeastConnections {
             }
             let rank = (filtered_index + len - start) % len;
             filtered_index += 1;
-            let weight = slow_start::endpoint_weight(&endpoint.address, endpoint.weight, weights);
+            let scaled = slow_start::endpoint_weight(&endpoint.address, endpoint.weight, weights);
             let load = self.counters[pos].load(Ordering::Acquire);
-            let ratio_load = u128::try_from(load).unwrap_or(u128::MAX);
-            let ratio_weight = u128::from(weight);
             let better = match best {
                 None => true,
-                Some((best_load, best_weight, best_rank, ..)) => {
-                    let left = ratio_load.saturating_mul(best_weight);
-                    let right = best_load.saturating_mul(ratio_weight);
+                Some((best_configured, best_scaled, best_rank, best_load, _)) => {
+                    let left = slow_start::ramp_load_cost(load, endpoint.weight, best_scaled);
+                    let right = slow_start::ramp_load_cost(best_load, best_configured, scaled);
                     left < right
-                        || (left == right && ratio_weight > best_weight)
-                        || (left == right && ratio_weight == best_weight && rank < best_rank)
+                        || (left == right && endpoint.weight > best_configured)
+                        || (left == right && endpoint.weight == best_configured && rank < best_rank)
                 },
             };
             if better {
-                best = Some((ratio_load, ratio_weight, rank, load, pos));
+                best = Some((endpoint.weight, scaled, rank, load, pos));
             }
         }
         best.map(|(_, _, _, load, pos)| (pos, load))
@@ -295,19 +293,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scaled_weight_shares_equal_load_with_the_ramp() {
+    fn a_small_ramp_does_not_beat_a_busy_full_endpoint() {
         let lc = LeastConnections::new(vec![
             WeightedEndpoint::simple(Arc::from("10.0.0.1:80"), 1),
             WeightedEndpoint::simple(Arc::from("10.0.0.2:80"), 1),
         ]);
-        let weights = EffectiveWeights::from_scaled(&[("10.0.0.1:80", 1_000_000), ("10.0.0.2:80", 500_000)]);
-        let first = lc.select_weighted(None, &[], Some(&weights)).unwrap();
-        assert_eq!(&*first, "10.0.0.1:80", "equal load prefers the higher ramp weight");
-        let second = lc.select_weighted(None, &[], Some(&weights)).unwrap();
-        assert_eq!(
-            &*second, "10.0.0.2:80",
-            "the lighter endpoint is chosen once the heavier one has a request in flight"
-        );
+        let weights = EffectiveWeights::from_scaled(&[("10.0.0.1:80", 1_000_000), ("10.0.0.2:80", 20_000)]);
+        for pick in 0..4 {
+            let picked = lc.select_weighted(None, &[], Some(&weights)).unwrap();
+            assert_eq!(
+                &*picked, "10.0.0.1:80",
+                "an endpoint at 2% of its weight does not take request {pick} while the full one has load {pick}"
+            );
+        }
     }
 
     #[test]

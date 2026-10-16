@@ -83,8 +83,11 @@ pub struct TcpLoadBalancerFilter {
     clusters: HashMap<Arc<str>, Strategy>,
 
     /// Slow-start bindings held for the lifetime of this pipeline.
+    ///
+    /// Attaching fills locks inside each binding, so the list itself is shared
+    /// without a mutex.
     #[cfg(feature = "slow-start")]
-    ramps: std::sync::Mutex<Vec<crate::load_balancing::slow_start::SlowStartBinding>>,
+    ramps: Vec<crate::load_balancing::slow_start::SlowStartBinding>,
 }
 
 impl TcpLoadBalancerFilter {
@@ -108,7 +111,7 @@ impl TcpLoadBalancerFilter {
         Self {
             clusters: map,
             #[cfg(feature = "slow-start")]
-            ramps: std::sync::Mutex::new(slow_start_bindings(clusters)),
+            ramps: slow_start_bindings(clusters),
         }
     }
 
@@ -149,10 +152,7 @@ impl TcpLoadBalancerFilter {
     ) -> Option<crate::load_balancing::slow_start::EffectiveWeights> {
         #[cfg(feature = "slow-start")]
         {
-            let ramps = self.ramps.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let weights = crate::load_balancing::slow_start::weights_for(&ramps, cluster, health);
-            drop(ramps);
-            weights
+            crate::load_balancing::slow_start::weights_for(&self.ramps, cluster, health)
         }
         #[cfg(not(feature = "slow-start"))]
         {
@@ -193,9 +193,9 @@ impl TcpFilter for TcpLoadBalancerFilter {
 
     #[cfg(feature = "slow-start")]
     fn bind_slow_start(&self, registry: &Arc<crate::SlowStartRegistry>) {
-        let mut ramps = self.ramps.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let pending = std::mem::take(&mut *ramps);
-        *ramps = pending.into_iter().map(|binding| binding.open(registry)).collect();
+        for binding in &self.ramps {
+            binding.open(registry);
+        }
     }
 
     async fn on_connect(&self, ctx: &mut TcpFilterContext<'_>) -> Result<FilterAction, FilterError> {

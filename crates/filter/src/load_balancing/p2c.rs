@@ -212,16 +212,20 @@ impl PowerOfTwoChoices {
         candidates.last().copied().unwrap_or(0)
     }
 
-    /// Less loaded of two endpoints, breaking ties with the higher ramp weight.
+    /// Lower `(load + 1) * configured / scaled`, breaking ties with higher configured weight.
     #[expect(clippy::indexing_slicing, reason = "positions come from the endpoints scan")]
     fn less_loaded_scaled(&self, a: usize, b: usize, weights: &EffectiveWeights) -> usize {
         let load_a = self.counters[a].load(Ordering::Acquire);
         let load_b = self.counters[b].load(Ordering::Acquire);
-        match load_a.cmp(&load_b) {
+        let scaled_a = self.scaled_weight(a, weights);
+        let scaled_b = self.scaled_weight(b, weights);
+        let cost_a = slow_start::ramp_load_cost(load_a, self.endpoints[a].weight, scaled_b);
+        let cost_b = slow_start::ramp_load_cost(load_b, self.endpoints[b].weight, scaled_a);
+        match cost_a.cmp(&cost_b) {
             core::cmp::Ordering::Less => a,
             core::cmp::Ordering::Greater => b,
             core::cmp::Ordering::Equal => {
-                if self.scaled_weight(a, weights) >= self.scaled_weight(b, weights) {
+                if self.endpoints[a].weight >= self.endpoints[b].weight {
                     a
                 } else {
                     b
@@ -338,6 +342,18 @@ mod tests {
     use praxis_core::health::{ClusterHealthEntry, EndpointHealth};
 
     use super::*;
+
+    #[test]
+    fn scaled_power_of_two_skips_a_zero_ramp() {
+        let p2c = PowerOfTwoChoices::new(vec![ep("10.0.0.1:80", 1), ep("10.0.0.2:80", 1)]);
+        let weights = EffectiveWeights::from_scaled(&[("10.0.0.1:80", 1_000_000), ("10.0.0.2:80", 0)]);
+        for _ in 0..16 {
+            let picked = p2c
+                .select_weighted(None, &[], Some(&weights))
+                .expect("the settled endpoint");
+            assert_eq!(&*picked, "10.0.0.1:80", "an endpoint at zero is not sampled");
+        }
+    }
 
     #[test]
     fn single_endpoint_always_selected() {

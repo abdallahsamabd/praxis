@@ -298,6 +298,34 @@ mod tests {
     }
 
     #[test]
+    fn an_idle_ramp_keeps_contiguous_buckets() {
+        let rr = RoundRobin::new(vec![
+            WeightedEndpoint::simple(Arc::from("10.0.0.1:80"), 2),
+            WeightedEndpoint::simple(Arc::from("10.0.0.2:80"), 1),
+        ]);
+        let weights = EffectiveWeights::idle(&[("10.0.0.1:80", 2_000_000), ("10.0.0.2:80", 1_000_000)]);
+        let picks: Vec<String> = std::iter::repeat_with(|| {
+            rr.select_weighted(None, &[], Some(&weights))
+                .expect("both endpoints have configured weight")
+                .to_string()
+        })
+        .take(6)
+        .collect();
+        assert_eq!(
+            picks,
+            [
+                "10.0.0.1:80",
+                "10.0.0.1:80",
+                "10.0.0.2:80",
+                "10.0.0.1:80",
+                "10.0.0.1:80",
+                "10.0.0.2:80",
+            ],
+            "an idle ramp uses configured buckets: {picks:?}"
+        );
+    }
+
+    #[test]
     fn single_endpoint() {
         let rr = RoundRobin::new(vec![WeightedEndpoint::simple(Arc::from("127.0.0.1:8080"), 1)]);
         assert_eq!(&*rr.select(None, &[]).unwrap(), "127.0.0.1:8080", "select #1");

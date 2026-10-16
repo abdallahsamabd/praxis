@@ -169,14 +169,19 @@ impl Strategy {
     }
 }
 
-/// Use configured selection unless the ramp is scaling capacity.
-fn apply_ramp<'a, T>(
+/// Use configured selection unless the ramp is scaling, and fall back to it
+/// when the scaled pass finds nothing.
+///
+/// A subset or retry can see only endpoints that are still at zero. Returning
+/// `None` from that pass would fail the request, or send a retry back to the
+/// endpoint it just excluded. The configured pass still serves those endpoints.
+fn apply_ramp<'a>(
     weights: Option<&'a EffectiveWeights>,
-    configured: impl FnOnce() -> T,
-    scaled: impl FnOnce(&'a EffectiveWeights) -> T,
-) -> T {
+    configured: impl FnOnce() -> Option<Arc<str>>,
+    scaled: impl FnOnce(&'a EffectiveWeights) -> Option<Arc<str>>,
+) -> Option<Arc<str>> {
     match slow_start::scaling_weights(weights) {
-        Some(weights) => scaled(weights),
+        Some(weights) => scaled(weights).or_else(configured),
         None => configured(),
     }
 }
@@ -653,5 +658,29 @@ mod tests {
             .select_weighted(Some("session"), None, &[], Some(&weights))
             .unwrap();
         assert_eq!(plain, ramped, "a hash strategy keeps its ring when a ramp is scaling");
+    }
+
+    #[test]
+    fn zero_ramp_subset_falls_back_to_configured_weight() {
+        use std::collections::HashMap;
+
+        use praxis_core::config::{SimpleStrategy, SubsetFallbackPolicy};
+
+        let mut first = WeightedEndpoint::simple(Arc::from("10.0.0.1:80"), 1);
+        first.metadata.insert("version".to_owned(), "canary".to_owned());
+        let mut second = WeightedEndpoint::simple(Arc::from("10.0.0.2:80"), 1);
+        second.metadata.insert("version".to_owned(), "canary".to_owned());
+        let subset = Subset::new(
+            vec![first, second],
+            &HashMap::from([("version".to_owned(), "canary".to_owned())]),
+            &SimpleStrategy::RoundRobin,
+            SubsetFallbackPolicy::NoEndpoint,
+        );
+        let strategy = Strategy::Subset(subset);
+        let weights = EffectiveWeights::from_scaled(&[("10.0.0.1:80", 0), ("10.0.0.2:80", 0)]);
+        assert!(
+            strategy.select_weighted(None, None, &[], Some(&weights)).is_some(),
+            "a no_endpoint subset whose members are still at zero keeps serving"
+        );
     }
 }
